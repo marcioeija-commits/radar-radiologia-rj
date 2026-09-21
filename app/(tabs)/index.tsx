@@ -1,0 +1,269 @@
+import { useMemo, useState } from "react";
+import {
+  Alert,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+
+import { ScreenContainer } from "@/components/screen-container";
+import { IconSymbol } from "@/components/ui/icon-symbol";
+import { useColors } from "@/hooks/use-colors";
+import { filterOpportunities, ROLE_FILTERS, type Opportunity, type RoleFilter } from "@/shared/monitoring";
+import { useAuth } from "@/hooks/use-auth";
+import { trpc } from "@/lib/trpc";
+
+const demoOpportunities: Opportunity[] = [
+  {
+    id: "demo-1",
+    title: "Técnico em Radiologia",
+    organization: "Hospitais e unidades públicas do RJ",
+    city: "Todo o estado",
+    role: "Técnico",
+    kind: "Concurso",
+    published: "Exemplo de alerta",
+    deadline: "Confira o edital",
+    source: "Diários oficiais",
+    featured: true,
+  },
+  {
+    id: "demo-2",
+    title: "Tecnólogo em Radiologia",
+    organization: "Rede pública de saúde",
+    city: "Região Metropolitana",
+    role: "Tecnólogo",
+    kind: "Processo seletivo",
+    published: "Exemplo de alerta",
+    deadline: "Confira a publicação",
+    source: "Portais de concursos",
+  },
+  {
+    id: "demo-3",
+    title: "Técnico em Radiologia",
+    organization: "Hospitais, clínicas e fundações",
+    city: "Niterói • São Gonçalo • Maricá",
+    role: "Técnico",
+    kind: "Vaga",
+    published: "Exemplo de alerta",
+    deadline: "Acompanhe a fonte",
+    source: "Empregadores da saúde",
+  },
+];
+
+export default function HomeScreen() {
+  const colors = useColors();
+  const { isAuthenticated } = useAuth({ autoFetch: true });
+  const liveQuery = trpc.monitoring.opportunities.useQuery(undefined, { enabled: isAuthenticated, retry: false });
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>("Todos");
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState("agora");
+
+  const opportunities = useMemo<Opportunity[]>(() => {
+    if (!liveQuery.data?.length) return demoOpportunities;
+    return liveQuery.data.map((item) => ({
+      id: String(item.id),
+      title: item.title,
+      organization: item.organization,
+      city: item.city,
+      role: item.role === "Tecnólogo" ? "Tecnólogo" : "Técnico",
+      kind: item.kind === "Processo seletivo" ? "Processo seletivo" : item.kind === "Concurso" ? "Concurso" : "Vaga",
+      published: item.publishedAt ? new Date(item.publishedAt).toLocaleDateString("pt-BR") : "Novo alerta",
+      deadline: item.deadlineAt ? new Date(item.deadlineAt).toLocaleDateString("pt-BR") : "Confira a publicação",
+      source: item.organization,
+    }));
+  }, [liveQuery.data]);
+  const filteredOpportunities = useMemo(() => filterOpportunities(opportunities, roleFilter), [opportunities, roleFilter]);
+
+  const refresh = () => {
+    setRefreshing(true);
+    setTimeout(() => {
+      setLastUpdated("agora");
+      setRefreshing(false);
+    }, 700);
+  };
+
+  return (
+    <ScreenContainer className="px-5" edges={["top", "left", "right"]}>
+      <FlatList
+        data={filteredOpportunities}
+        keyExtractor={(item) => item.id}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />
+        }
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={
+          <View>
+            <View style={styles.topRow}>
+              <View>
+                <Text style={[styles.eyebrow, { color: colors.primary }]}>RADAR RADIOLOGIA RJ</Text>
+                <Text style={[styles.greeting, { color: colors.foreground }]}>Oportunidades para ela</Text>
+                <Text style={[styles.dedication, { color: colors.primary }]}>Criado por Márcio para Cíntia</Text>
+              </View>
+              <View style={[styles.liveDot, { backgroundColor: colors.success }]}>
+                <IconSymbol name="bell.fill" size={19} color="#FFFFFF" />
+              </View>
+            </View>
+
+            <View style={[styles.heroCard, { backgroundColor: colors.primary }]}> 
+              <View style={styles.heroCopy}>
+                <Text style={styles.heroKicker}>MONITORAMENTO DO RJ</Text>
+                <Text style={styles.heroTitle}>Não deixe uma boa vaga passar.</Text>
+                <Text style={styles.heroBody}>
+                  Acompanhe concursos e oportunidades para técnico e tecnólogo em radiologia em um só lugar.
+                </Text>
+              </View>
+              <View style={styles.heroBadge}>
+                <IconSymbol name="radiowaves.left" size={28} color={colors.primary} />
+              </View>
+            </View>
+
+            <View style={styles.infoStrip}>
+              <IconSymbol name="info.circle.fill" size={16} color={colors.warning} />
+              <Text style={[styles.infoText, { color: colors.muted }]}>{liveQuery.data?.length ? "Fontes conectadas: oportunidades reais encontradas no monitoramento." : "Prévia do app: conecte as fontes na aba Ajustes para ativar o monitoramento real."}</Text>
+            </View>
+
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Oportunidades</Text>
+                <Text style={[styles.sectionSubtitle, { color: colors.muted }]}>Filtradas para o estado do Rio de Janeiro</Text>
+              </View>
+              <Pressable onPress={refresh} style={({ pressed }) => [styles.refreshButton, pressed && styles.pressed]}>
+                <IconSymbol name="arrow.clockwise" size={17} color={colors.primary} />
+                <Text style={[styles.refreshText, { color: colors.primary }]}>Atualizar</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.filterRow}>
+              {ROLE_FILTERS.map((filter) => {
+                const active = roleFilter === filter;
+                return (
+                  <Pressable
+                    key={filter}
+                    onPress={() => setRoleFilter(filter)}
+                    style={({ pressed }) => [
+                      styles.filterChip,
+                      { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primary : colors.surface },
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={[styles.filterText, { color: active ? "#FFFFFF" : colors.muted }]}>{filter}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.summaryRow}>
+              <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.summaryNumber, { color: colors.primary }]}>RJ</Text>
+                <Text style={[styles.summaryLabel, { color: colors.muted }]}>região ativa</Text>
+              </View>
+              <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <IconSymbol name="checkmark.seal.fill" size={23} color={colors.success} />
+                <Text style={[styles.summaryLabel, { color: colors.muted }]}>filtros salvos</Text>
+              </View>
+              <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.summaryNumber, { color: colors.foreground }]}>24h</Text>
+                <Text style={[styles.summaryLabel, { color: colors.muted }]}>frequência</Text>
+              </View>
+            </View>
+
+            <Text style={[styles.updated, { color: colors.muted }]}>Última atualização: {lastUpdated}</Text>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <Pressable
+            onPress={() => Alert.alert(item.title, `${item.organization}\n${item.city}\n\nFonte: ${item.source}\n\nEste card é uma prévia visual. O link oficial será mostrado quando a fonte for conectada em Ajustes.`)}
+            style={({ pressed }) => [
+              styles.opportunityCard,
+              { backgroundColor: colors.surface, borderColor: item.featured ? colors.primary : colors.border },
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={styles.cardTopLine}>
+              <View style={[styles.kindPill, { backgroundColor: item.kind === "Concurso" ? `${colors.primary}18` : `${colors.warning}1A` }]}>
+                <Text style={[styles.kindText, { color: item.kind === "Concurso" ? colors.primary : colors.warning }]}>{item.kind}</Text>
+              </View>
+              <IconSymbol name="chevron.right" size={18} color={colors.muted} />
+            </View>
+            <Text style={[styles.opportunityTitle, { color: colors.foreground }]}>{item.title}</Text>
+            <Text style={[styles.organization, { color: colors.muted }]}>{item.organization}</Text>
+            <View style={styles.metaRow}>
+              <View style={styles.metaItem}>
+                <IconSymbol name="mappin.and.ellipse" size={15} color={colors.primary} />
+                <Text style={[styles.metaText, { color: colors.muted }]}>{item.city}</Text>
+              </View>
+              <View style={styles.metaItem}>
+                <IconSymbol name="calendar" size={15} color={colors.primary} />
+                <Text style={[styles.metaText, { color: colors.muted }]}>{item.deadline}</Text>
+              </View>
+            </View>
+            <View style={[styles.cardFooter, { borderTopColor: colors.border }]}>
+              <Text style={[styles.sourceText, { color: colors.muted }]}>{item.source}</Text>
+              <Text style={[styles.publishedText, { color: colors.primary }]}>{item.published}</Text>
+            </View>
+          </Pressable>
+        )}
+        ListFooterComponent={
+          <View style={[styles.footerNote, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <IconSymbol name="shield.checkered" size={22} color={colors.success} />
+            <View style={styles.footerCopy}>
+              <Text style={[styles.footerTitle, { color: colors.foreground }]}>Editais oficiais em primeiro lugar</Text>
+              <Text style={[styles.footerBody, { color: colors.muted }]}>O app deve sempre levar vocês para a publicação original antes de qualquer candidatura.</Text>
+            </View>
+          </View>
+        }
+      />
+    </ScreenContainer>
+  );
+}
+
+const styles = StyleSheet.create({
+  listContent: { paddingTop: 18, paddingBottom: 32 },
+  topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 18 },
+  eyebrow: { fontSize: 11, fontWeight: "800", letterSpacing: 1.5 },
+  greeting: { fontSize: 27, fontWeight: "800", marginTop: 5, letterSpacing: -0.7 },
+  dedication: { fontSize: 13, fontWeight: "800", marginTop: 7, letterSpacing: 0.1 },
+  liveDot: { width: 42, height: 42, borderRadius: 15, alignItems: "center", justifyContent: "center", shadowColor: "#123", shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 3 },
+  heroCard: { borderRadius: 26, padding: 21, minHeight: 166, flexDirection: "row", overflow: "hidden", shadowColor: "#0F766E", shadowOpacity: 0.2, shadowRadius: 15, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
+  heroCopy: { flex: 1, paddingRight: 10 },
+  heroKicker: { color: "#B9FFF5", fontSize: 10, fontWeight: "800", letterSpacing: 1.4, marginBottom: 10 },
+  heroTitle: { color: "#FFFFFF", fontSize: 24, lineHeight: 29, fontWeight: "800", letterSpacing: -0.5 },
+  heroBody: { color: "#D9FFFB", fontSize: 13, lineHeight: 19, marginTop: 10 },
+  heroBadge: { width: 52, height: 52, borderRadius: 18, backgroundColor: "#DDFCF8", alignItems: "center", justifyContent: "center", marginTop: 3 },
+  infoStrip: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginTop: 15, paddingHorizontal: 3 },
+  infoText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginTop: 25, marginBottom: 13 },
+  sectionTitle: { fontSize: 20, fontWeight: "800" },
+  sectionSubtitle: { fontSize: 12, marginTop: 4 },
+  refreshButton: { flexDirection: "row", gap: 5, alignItems: "center", paddingVertical: 6, paddingLeft: 8 },
+  refreshText: { fontSize: 12, fontWeight: "800" },
+  filterRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
+  filterChip: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 9 },
+  filterText: { fontSize: 12, fontWeight: "700" },
+  summaryRow: { flexDirection: "row", gap: 9, marginBottom: 14 },
+  summaryCard: { flex: 1, borderRadius: 16, borderWidth: 1, minHeight: 69, paddingHorizontal: 11, paddingVertical: 11, justifyContent: "space-between" },
+  summaryNumber: { fontSize: 18, fontWeight: "800" },
+  summaryLabel: { fontSize: 10, fontWeight: "600" },
+  updated: { fontSize: 11, marginBottom: 11 },
+  opportunityCard: { borderRadius: 20, borderWidth: 1, padding: 16, marginBottom: 12, shadowColor: "#0A3332", shadowOpacity: 0.05, shadowRadius: 7, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  cardTopLine: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  kindPill: { borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5 },
+  kindText: { fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.7 },
+  opportunityTitle: { fontSize: 18, fontWeight: "800", letterSpacing: -0.2 },
+  organization: { fontSize: 13, lineHeight: 19, marginTop: 5 },
+  metaRow: { gap: 7, marginTop: 14 },
+  metaItem: { flexDirection: "row", alignItems: "center", gap: 6 },
+  metaText: { fontSize: 12, flexShrink: 1 },
+  cardFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: 1, marginTop: 14, paddingTop: 12 },
+  sourceText: { fontSize: 11, fontWeight: "600" },
+  publishedText: { fontSize: 11, fontWeight: "800" },
+  footerNote: { flexDirection: "row", gap: 10, borderRadius: 18, borderWidth: 1, padding: 15, marginTop: 4 },
+  footerCopy: { flex: 1 },
+  footerTitle: { fontSize: 13, fontWeight: "800" },
+  footerBody: { fontSize: 11, lineHeight: 16, marginTop: 4 },
+  pressed: { opacity: 0.72, transform: [{ scale: 0.985 }] },
+});

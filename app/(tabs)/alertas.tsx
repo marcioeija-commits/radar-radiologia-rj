@@ -1,16 +1,19 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Clipboard from "expo-clipboard";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
-import { useEffect, useState } from "react";
-import { Alert, FlatList, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { Alert, FlatList, Linking, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
-import { useAuth } from "@/hooks/use-auth";
+import { getInstallationCredentials } from "@/lib/installation";
 import { trpc } from "@/lib/trpc";
 
 const ALERTS_KEY = "radar-alerts-enabled";
+const PUSH_TOKEN_KEY = "radar-push-token";
+const SETTINGS_KEY = "radar-settings";
 
 const activity = [
   { id: "1", time: "Agora", title: "Radar configurado para o RJ", body: "O app está pronto para acompanhar Técnico e Tecnólogo em Radiologia.", icon: "checkmark.seal.fill" as const, tone: "success" },
@@ -20,16 +23,104 @@ const activity = [
 
 export default function AlertsScreen() {
   const colors = useColors();
-  const { user } = useAuth({ autoFetch: true });
-  const registerDevice = trpc.monitoring.devices.register.useMutation();
+  const registerInstallation = trpc.monitoring.devices.registerInstallation.useMutation();
+  const setInstallationEnabled = trpc.monitoring.devices.setInstallationEnabled.useMutation();
+  const saveInstallationPreferences = trpc.monitoring.devices.saveInstallationPreferences.useMutation();
+  const registerInstallationAsync = registerInstallation.mutateAsync;
+  const setInstallationEnabledAsync = setInstallationEnabled.mutateAsync;
+  const saveInstallationPreferencesAsync = saveInstallationPreferences.mutateAsync;
   const [enabled, setEnabled] = useState(false);
+  const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
+  const [pushTokenError, setPushTokenError] = useState<string | null>(null);
+
+  const registerCurrentToken = useCallback(async (enableAfterRegister: boolean) => {
+    if (Platform.OS === "web") return;
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+    if (!projectId) throw new Error("Expo project ID is not configured");
+    const credentials = await getInstallationCredentials();
+    const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+    const registered = await registerInstallationAsync({
+      ...credentials,
+      token,
+      platform: Platform.OS === "ios" ? "ios" : "android",
+    });
+    const settingsValue = await AsyncStorage.getItem(SETTINGS_KEY);
+    if (settingsValue) {
+      const preferences = JSON.parse(settingsValue);
+      await saveInstallationPreferencesAsync({ ...credentials, preferences });
+    }
+    const shouldEnable = enableAfterRegister || (await AsyncStorage.getItem(ALERTS_KEY)) !== "false";
+    if (!shouldEnable || (enableAfterRegister && !registered.enabled)) {
+      await setInstallationEnabledAsync({ ...credentials, enabled: enableAfterRegister });
+    }
+    setExpoPushToken(token);
+    await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+    if (enableAfterRegister) {
+      setEnabled(true);
+      await AsyncStorage.setItem(ALERTS_KEY, "true");
+    } else if (await AsyncStorage.getItem(ALERTS_KEY) === null) {
+      setEnabled(registered.enabled);
+      await AsyncStorage.setItem(ALERTS_KEY, String(registered.enabled));
+    }
+  }, [registerInstallationAsync, saveInstallationPreferencesAsync, setInstallationEnabledAsync]);
 
   useEffect(() => {
-    AsyncStorage.getItem(ALERTS_KEY).then((value) => setEnabled(value === "true"));
-  }, []);
+    let mounted = true;
+    void Promise.all([AsyncStorage.getItem(ALERTS_KEY), AsyncStorage.getItem(PUSH_TOKEN_KEY)]).then(async ([value, token]) => {
+      if (!mounted) return;
+      setEnabled(value === "true");
+      if (token) setExpoPushToken(token);
+      if (Platform.OS === "web") return;
+      const permission = await Notifications.getPermissionsAsync();
+      if (permission.status !== "granted") return;
+      try {
+        await registerCurrentToken(false);
+      } catch (error) {
+        console.warn("[Notifications] Automatic installation registration failed", error);
+      }
+    });
+
+    if (Platform.OS === "web") return () => { mounted = false; };
+
+    const tokenSubscription = Notifications.addPushTokenListener(() => {
+      void registerCurrentToken(false).catch((error) => {
+        console.warn("[Notifications] Push token renewal failed", error);
+      });
+    });
+    const responseSubscription = Notifications.addNotificationResponseReceivedListener(async (response) => {
+      const data = response.notification.request.content.data as {
+        url?: unknown;
+      };
+
+      if (typeof data.url !== "string" || !data.url) return;
+
+      try {
+        await Linking.openURL(data.url);
+      } catch (error) {
+        console.warn("[Notifications] Failed to open opportunity URL", error);
+        Alert.alert("Não foi possível abrir a oportunidade", data.url);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      tokenSubscription.remove();
+      responseSubscription.remove();
+    };
+  }, [registerCurrentToken]);
 
   const toggleNotifications = async (value: boolean) => {
     if (!value) {
+      if (Platform.OS !== "web") {
+        try {
+          const credentials = await getInstallationCredentials();
+          await setInstallationEnabledAsync({ ...credentials, enabled: false });
+        } catch (error) {
+          const technicalMessage = error instanceof Error ? error.message : String(error);
+          Alert.alert("Não foi possível desativar no servidor", technicalMessage);
+          return;
+        }
+      }
       setEnabled(false);
       await AsyncStorage.setItem(ALERTS_KEY, "false");
       return;
@@ -53,20 +144,26 @@ export default function AlertsScreen() {
       return;
     }
 
-    setEnabled(true);
-    await AsyncStorage.setItem(ALERTS_KEY, "true");
-    if (user) {
-      try {
-        const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-        if (projectId) {
-          const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-          await registerDevice.mutateAsync({ token, platform: Platform.OS === "ios" ? "ios" : "android" });
-        }
-      } catch (error) {
-        console.warn("[Notifications] Failed to register push device", error);
-      }
+    setPushTokenError(null);
+    try {
+      await registerCurrentToken(true);
+      Alert.alert("Notificações ativadas", "Este aparelho foi registrado automaticamente e funciona sem login.");
+    } catch (error) {
+      const technicalMessage = error instanceof Error ? error.message : String(error);
+      setPushTokenError(technicalMessage);
+      console.warn("[Notifications] Failed to register push device", error);
+      Alert.alert("Erro técnico nas notificações", technicalMessage);
     }
-    Alert.alert("Notificações ativadas", user ? "Este celular foi associado à conta do Radar." : "A permissão foi ativada neste celular. Entre na conta para compartilhar os alertas com outro aparelho.");
+  };
+
+  const copyExpoPushToken = async () => {
+    if (!expoPushToken) return;
+    try {
+      await Clipboard.setStringAsync(expoPushToken);
+      Alert.alert("Token copiado", "O token completo foi copiado para a área de transferência deste aparelho.");
+    } catch {
+      Alert.alert("Não foi possível copiar", "Tente novamente neste aparelho.");
+    }
   };
 
   return (
@@ -80,7 +177,7 @@ export default function AlertsScreen() {
           <View>
             <Text style={[styles.eyebrow, { color: colors.primary }]}>CENTRAL DE ALERTAS</Text>
             <Text style={[styles.title, { color: colors.foreground }]}>Fique sabendo primeiro.</Text>
-            <Text style={[styles.subtitle, { color: colors.muted }]}>Escolha como o Radar deve avisar vocês quando uma nova oportunidade aparecer.</Text>
+            <Text style={[styles.subtitle, { color: colors.muted }]}>Ative alertas neste aparelho, sem criar conta ou fazer login.</Text>
 
             <View style={[styles.alertCard, { backgroundColor: colors.surface, borderColor: enabled ? colors.primary : colors.border }]}>
               <View style={[styles.alertIcon, { backgroundColor: enabled ? `${colors.primary}18` : `${colors.muted}18` }]}>
@@ -91,6 +188,26 @@ export default function AlertsScreen() {
                 <Text style={[styles.alertBody, { color: colors.muted }]}>{enabled ? "Ativadas neste celular" : "Toque para ativar neste celular"}</Text>
               </View>
               <Switch value={enabled} onValueChange={toggleNotifications} trackColor={{ false: colors.border, true: `${colors.primary}88` }} thumbColor={enabled ? colors.primary : "#FFFFFF"} />
+            </View>
+
+            <View style={[styles.tokenCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.alertTitle, { color: colors.foreground }]}>Token de teste</Text>
+              <Text style={[styles.alertBody, styles.tokenValue, { color: colors.muted }]}>
+                {expoPushToken ? "ExponentPushToken[****...****]" : "Token ainda não disponível"}
+              </Text>
+              {pushTokenError && (
+                <Text selectable style={[styles.tokenError, { color: colors.warning }]}>
+                  Detalhe técnico: {pushTokenError}
+                </Text>
+              )}
+              <Pressable
+                accessibilityRole="button"
+                disabled={!expoPushToken}
+                onPress={copyExpoPushToken}
+                style={({ pressed }) => [styles.copyTokenButton, { backgroundColor: colors.primary }, !expoPushToken && styles.copyTokenButtonDisabled, pressed && expoPushToken && styles.pressed]}
+              >
+                <Text style={styles.copyTokenButtonText}>Copiar token</Text>
+              </Pressable>
             </View>
 
             <View style={[styles.preferenceCard, { backgroundColor: colors.primary }]}>
@@ -141,14 +258,20 @@ const styles = StyleSheet.create({
   alertCopy: { flex: 1, marginLeft: 12 },
   alertTitle: { fontSize: 15, fontWeight: "800" },
   alertBody: { fontSize: 12, marginTop: 4 },
+  tokenCard: { borderRadius: 16, borderWidth: 1, padding: 15, marginBottom: 16 },
+  tokenValue: { fontFamily: "monospace", marginTop: 7 },
+  tokenError: { fontSize: 12, lineHeight: 18, marginTop: 8 },
+  copyTokenButton: { alignSelf: "flex-start", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginTop: 12 },
+  copyTokenButtonDisabled: { opacity: 0.45 },
+  copyTokenButtonText: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
   preferenceCard: { borderRadius: 21, padding: 17, marginBottom: 25 },
   preferenceHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   preferenceTitle: { color: "#FFFFFF", fontSize: 16, fontWeight: "800" },
-  activePill: { backgroundColor: "#B9FFF5", borderRadius: 99, paddingHorizontal: 8, paddingVertical: 5 },
-  activePillText: { color: "#0F766E", fontSize: 9, fontWeight: "900", letterSpacing: 0.5 },
-  preferenceBody: { color: "#D9FFFB", fontSize: 13, lineHeight: 19, marginTop: 12 },
+  activePill: { backgroundColor: "#DBEAFE", borderRadius: 99, paddingHorizontal: 8, paddingVertical: 5 },
+  activePillText: { color: "#1D4ED8", fontSize: 9, fontWeight: "900", letterSpacing: 0.5 },
+  preferenceBody: { color: "#E8F1FF", fontSize: 13, lineHeight: 19, marginTop: 12 },
   preferenceFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopColor: "#FFFFFF30", borderTopWidth: 1, paddingTop: 12, marginTop: 15 },
-  preferenceHint: { color: "#B9FFF5", fontSize: 11, fontWeight: "700" },
+  preferenceHint: { color: "#DBEAFE", fontSize: 11, fontWeight: "700" },
   sectionTitle: { fontSize: 19, fontWeight: "800", marginBottom: 3 },
   activityRow: { flexDirection: "row", paddingVertical: 15, borderBottomWidth: 1, gap: 12 },
   activityIcon: { width: 35, height: 35, borderRadius: 12, alignItems: "center", justifyContent: "center" },

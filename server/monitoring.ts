@@ -5,6 +5,7 @@ import * as db from "./db";
 
 const USER_AGENT = "RadarRadiologiaRJ/1.0 (+monitoramento de oportunidades; contato pelo app)";
 const FETCH_TIMEOUT_MS = 18_000;
+const FETCH_RETRIES = 2;
 const MAX_TEXT_LENGTH = 20_000;
 const MAX_CANDIDATES_PER_PAGE = 80;
 
@@ -38,6 +39,10 @@ function normalizeText(input: string): string {
     .replace(/&amp;/gi, "&")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([\da-f]+);/gi, (_match, code: string) => String.fromCodePoint(parseInt(code, 16)))
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -96,16 +101,20 @@ export function extractCandidates(html: string, pageUrl: string, sourceName: str
   while ((match = anchorPattern.exec(html)) && candidates.length < MAX_CANDIDATES_PER_PAGE) {
     const href = absoluteUrl(match[1], pageUrl);
     const title = normalizeText(match[2]);
-    if (title.length < 12) continue;
-    const context = normalizeText(`${title} ${sourceName} ${href}`);
+    const before = html.slice(Math.max(0, match.index - 900), match.index);
+    const after = html.slice(anchorPattern.lastIndex, Math.min(html.length, anchorPattern.lastIndex + 900));
+    const fragment = normalizeText(`${before} ${match[0]} ${after}`);
+    if (title.length < 4 && fragment.length < 20) continue;
+    const context = normalizeText(`${fragment} ${sourceName} ${href}`);
     if (!looksLikeOpportunity(context)) continue;
-    const key = `${href}|${title}`;
+    const displayTitle = title.length >= 12 ? title : fragment.slice(-500).slice(0, 255);
+    const key = href;
     if (seen.has(key)) continue;
     seen.add(key);
     const role = inferRole(context);
     candidates.push({
       externalId: hash(key).slice(0, 48),
-      title: title.slice(0, 255),
+      title: displayTitle.slice(0, 255),
       organization: sourceName.slice(0, 255),
       city: "Rio de Janeiro (RJ)",
       role,
@@ -118,45 +127,77 @@ export function extractCandidates(html: string, pageUrl: string, sourceName: str
     });
   }
 
-  const pageText = normalizeText(html).slice(0, MAX_TEXT_LENGTH);
-  if (candidates.length === 0 && looksLikeOpportunity(pageText)) {
-    const title = normalizeText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? sourceName);
-    candidates.push({
-      externalId: hash(pageUrl).slice(0, 48),
-      title: title.slice(0, 255),
-      organization: sourceName.slice(0, 255),
-      city: "Rio de Janeiro (RJ)",
-      role: inferRole(pageText),
-      kind: inferKind(pageText),
-      sourceUrl: pageUrl,
-      publishedAt: findDate(pageText),
-      deadlineAt: null,
-      summary: pageText.slice(0, 1000),
-      rawText: pageText,
-    });
-  }
   return candidates;
 }
 
-async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url, { headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: "follow" });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("pdf")) return "";
-  return response.text();
+async function fetchText(url: string, onHttpStatus: (status: number) => void): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= FETCH_RETRIES; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8" },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        redirect: "follow",
+      });
+      onHttpStatus(response.status);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const contentType = response.headers.get("content-type") ?? "";
+      if (contentType.includes("pdf") || new URL(response.url || url).pathname.toLowerCase().endsWith(".pdf")) {
+        throw new Error("Resposta PDF; extração de PDF ainda não configurada");
+      }
+      const text = await response.text();
+      if (!text.trim()) throw new Error("Resposta HTML vazia");
+      return text;
+    } catch (error) {
+      lastError = error;
+      if (attempt < FETCH_RETRIES) await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 async function sendExpoPushNotifications(items: MonitorCandidate[]) {
   if (items.length === 0) return { sent: 0 };
   const devices = await db.listEnabledPushDevices();
-  const messages = devices
-    .filter((device) => device.token.startsWith("ExponentPushToken["))
-    .flatMap((device) => items.slice(0, 3).map((item) => ({ to: device.token, sound: "default", title: `Nova oportunidade: ${item.role}`, body: item.title, data: { opportunityId: item.externalId, url: item.sourceUrl } })));
+  const eligibleDevices = devices.filter((device) => /^(ExponentPushToken|ExpoPushToken)\[[^\]]+\]$/.test(device.token));
+  const devicePreferences = await Promise.all(eligibleDevices.map(async (device) => ({
+    device,
+    preference: await db.getPushDeviceAlertPreferences(device),
+  })));
+  // Do not mutate or merge database rows. If a legacy and secure row address the same Expo destination,
+  // prefer the secure row for this send so an upgraded phone receives one message using its device prefs.
+  const recipients = new Map<string, typeof devicePreferences[number]>();
+  for (const entry of devicePreferences) {
+    const current = recipients.get(entry.device.token);
+    if (!current || (!current.device.credentialHash && entry.device.credentialHash)) {
+      recipients.set(entry.device.token, entry);
+    }
+  }
+  const messages = [...recipients.values()]
+    .flatMap(({ device, preference }) => {
+      if (!preference) return [];
+      return items
+        .filter((item) => {
+          const kindEnabled = item.kind === "Concurso"
+            ? preference.concursos
+            : item.kind === "Processo seletivo"
+              ? preference.processos
+              : preference.vagas;
+          const roleEnabled = item.role === "Técnico"
+            ? preference.tecnico
+            : item.role === "Tecnólogo" && preference.tecnologo;
+          return kindEnabled && roleEnabled && preference.todoEstado;
+        })
+        .slice(0, 3)
+        .map((item) => ({ to: device.token, sound: "default", title: `Nova oportunidade: ${item.role}`, body: item.title, data: { opportunityId: item.externalId, url: item.sourceUrl } }));
+    });
   let sent = 0;
   for (let index = 0; index < messages.length; index += 100) {
     const batch = messages.slice(index, index + 100);
-    const response = await fetch("https://exp.host/--/api/v2/push/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(batch) });
-    if (response.ok) sent += batch.length;
+    const response = await fetch("https://exp.host/--/api/v2/push/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(batch), signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) continue;
+    const payload = await response.json() as { data?: Array<{ status?: string }> };
+    sent += payload.data?.filter((ticket) => ticket.status === "ok").length ?? 0;
   }
   return { sent };
 }
@@ -168,42 +209,89 @@ export async function runMonitoringCycle() {
   const failures: string[] = [];
   let pages = 0;
 
-  for (const source of sources) {
+  const jobs = sources.flatMap((source) => {
     const urls = JSON.parse(source.urls) as string[];
-    for (const url of urls) {
-      try {
-        const html = await fetchText(url);
-        pages += 1;
-        const candidates = extractCandidates(html, url, source.name);
-        for (const candidate of candidates) {
-          const result = await db.upsertOpportunity({
-            sourceId: source.id,
-            externalId: candidate.externalId,
-            title: candidate.title,
-            organization: candidate.organization,
-            city: candidate.city,
-            role: candidate.role,
-            kind: candidate.kind,
-            sourceUrl: candidate.sourceUrl,
-            publishedAt: candidate.publishedAt,
-            deadlineAt: candidate.deadlineAt,
-            summary: candidate.summary,
-            rawText: candidate.rawText,
-            contentHash: hash(candidate.rawText),
-            isActive: true,
+    return urls.map((url) => ({ source, url }));
+  });
+
+  const CONCURRENCY = 4;
+
+  for (let index = 0; index < jobs.length; index += CONCURRENCY) {
+    const batch = jobs.slice(index, index + CONCURRENCY);
+
+    await Promise.all(
+      batch.map(async ({ source, url }) => {
+        const startedAt = new Date();
+        let httpStatus: number | null = null;
+        let foundCount = 0;
+        let runError: string | null = null;
+
+        try {
+          const html = await fetchText(url, (status) => {
+            httpStatus = status;
           });
-          if (result.created && candidate.role !== "Outro" && candidate.kind !== "Informativo") fresh.push(candidate);
+          pages += 1;
+
+          const candidates = extractCandidates(html, url, source.name);
+
+          for (const candidate of candidates) {
+            const result = await db.upsertOpportunity({
+              sourceId: source.id,
+              externalId: candidate.externalId,
+              title: candidate.title,
+              organization: candidate.organization,
+              city: candidate.city,
+              role: candidate.role,
+              kind: candidate.kind,
+              sourceUrl: candidate.sourceUrl,
+              publishedAt: candidate.publishedAt,
+              deadlineAt: candidate.deadlineAt,
+              summary: candidate.summary,
+              rawText: candidate.rawText,
+              contentHash: hash(candidate.rawText),
+              isActive: true,
+            });
+            foundCount += 1;
+
+            if (
+              result.created &&
+              candidate.role !== "Outro" &&
+              candidate.kind !== "Informativo"
+            ) {
+              fresh.push(candidate);
+            }
+          }
+        } catch (error) {
+          const message = `${source.slug}: ${url} — ${String(error)}`;
+          failures.push(message);
+          runError = message;
         }
-      } catch (error) {
-        failures.push(`${source.slug}: ${url} — ${String(error)}`);
-      }
-    }
+
+        const finishedAt = new Date();
+        await db.recordMonitorRun({
+          sourceId: source.id,
+          url,
+          startedAt,
+          finishedAt,
+          httpStatus,
+          foundCount,
+          durationMs: finishedAt.getTime() - startedAt.getTime(),
+          error: runError ? runError.slice(0, 6000) : null,
+        });
+      }),
+    );
   }
 
   const notification = await sendExpoPushNotifications(fresh);
-  return { sources: sources.length, pages, newOpportunities: fresh.length, notificationsSent: notification.sent, failures };
-}
 
+  return {
+    sources: sources.length,
+    pages,
+    newOpportunities: fresh.length,
+    notificationsSent: notification.sent,
+    failures,
+  };
+}
 export async function handleMonitorCron(req: Request, res: Response) {
   try {
     const user = await sdk.authenticateRequest(req);

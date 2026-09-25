@@ -4,6 +4,7 @@ import {
   FlatList,
   Pressable,
   RefreshControl,
+  Linking,
   StyleSheet,
   Text,
   View,
@@ -13,56 +14,17 @@ import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
 import { filterOpportunities, ROLE_FILTERS, type Opportunity, type RoleFilter } from "@/shared/monitoring";
-import { useAuth } from "@/hooks/use-auth";
 import { trpc } from "@/lib/trpc";
-
-const demoOpportunities: Opportunity[] = [
-  {
-    id: "demo-1",
-    title: "Técnico em Radiologia",
-    organization: "Hospitais e unidades públicas do RJ",
-    city: "Todo o estado",
-    role: "Técnico",
-    kind: "Concurso",
-    published: "Exemplo de alerta",
-    deadline: "Confira o edital",
-    source: "Diários oficiais",
-    featured: true,
-  },
-  {
-    id: "demo-2",
-    title: "Tecnólogo em Radiologia",
-    organization: "Rede pública de saúde",
-    city: "Região Metropolitana",
-    role: "Tecnólogo",
-    kind: "Processo seletivo",
-    published: "Exemplo de alerta",
-    deadline: "Confira a publicação",
-    source: "Portais de concursos",
-  },
-  {
-    id: "demo-3",
-    title: "Técnico em Radiologia",
-    organization: "Hospitais, clínicas e fundações",
-    city: "Niterói • São Gonçalo • Maricá",
-    role: "Técnico",
-    kind: "Vaga",
-    published: "Exemplo de alerta",
-    deadline: "Acompanhe a fonte",
-    source: "Empregadores da saúde",
-  },
-];
 
 export default function HomeScreen() {
   const colors = useColors();
-  const { isAuthenticated } = useAuth({ autoFetch: true });
-  const liveQuery = trpc.monitoring.opportunities.useQuery(undefined, { enabled: isAuthenticated, retry: false });
+  const liveQuery = trpc.monitoring.opportunities.useQuery(undefined, { retry: false });
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("Todos");
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState("agora");
 
   const opportunities = useMemo<Opportunity[]>(() => {
-    if (!liveQuery.data?.length) return demoOpportunities;
+    if (!liveQuery.data?.length) return [];
     return liveQuery.data.map((item) => ({
       id: String(item.id),
       title: item.title,
@@ -73,16 +35,19 @@ export default function HomeScreen() {
       published: item.publishedAt ? new Date(item.publishedAt).toLocaleDateString("pt-BR") : "Novo alerta",
       deadline: item.deadlineAt ? new Date(item.deadlineAt).toLocaleDateString("pt-BR") : "Confira a publicação",
       source: item.organization,
+      sourceUrl: item.sourceUrl,
     }));
   }, [liveQuery.data]);
   const filteredOpportunities = useMemo(() => filterOpportunities(opportunities, roleFilter), [opportunities, roleFilter]);
 
-  const refresh = () => {
+  const refresh = async () => {
     setRefreshing(true);
-    setTimeout(() => {
+    try {
+      await liveQuery.refetch();
       setLastUpdated("agora");
+    } finally {
       setRefreshing(false);
-    }, 700);
+    }
   };
 
   return (
@@ -101,7 +66,11 @@ export default function HomeScreen() {
               <View>
                 <Text style={[styles.eyebrow, { color: colors.primary }]}>RADAR RADIOLOGIA RJ</Text>
                 <Text style={[styles.greeting, { color: colors.foreground }]}>Oportunidades para ela</Text>
-                <Text style={[styles.dedication, { color: colors.primary }]}>Criado por Márcio para Cíntia</Text>
+                <View style={styles.authorBlock}>
+                  {/* Substituível futuramente por assets/images/author-photo.png */}
+                  <View style={[styles.authorPhotoSpace, { borderColor: colors.border, backgroundColor: colors.surface }]} />
+                  <Text style={[styles.dedication, { color: colors.primary }]}>Por Márcio</Text>
+                </View>
               </View>
               <View style={[styles.liveDot, { backgroundColor: colors.success }]}>
                 <IconSymbol name="bell.fill" size={19} color="#FFFFFF" />
@@ -123,7 +92,13 @@ export default function HomeScreen() {
 
             <View style={styles.infoStrip}>
               <IconSymbol name="info.circle.fill" size={16} color={colors.warning} />
-              <Text style={[styles.infoText, { color: colors.muted }]}>{liveQuery.data?.length ? "Fontes conectadas: oportunidades reais encontradas no monitoramento." : "Prévia do app: conecte as fontes na aba Ajustes para ativar o monitoramento real."}</Text>
+              <Text style={[styles.infoText, { color: colors.muted }]}>
+                {liveQuery.isLoading
+                  ? "Consultando as oportunidades monitoradas..."
+                  : liveQuery.data?.length
+                    ? "Monitoramento ativo: oportunidades reais encontradas."
+                    : "Nenhuma oportunidade encontrada no momento. O radar continuará monitorando as fontes oficiais."}
+              </Text>
             </View>
 
             <View style={styles.sectionHeader}>
@@ -176,7 +151,20 @@ export default function HomeScreen() {
         }
         renderItem={({ item }) => (
           <Pressable
-            onPress={() => Alert.alert(item.title, `${item.organization}\n${item.city}\n\nFonte: ${item.source}\n\nEste card é uma prévia visual. O link oficial será mostrado quando a fonte for conectada em Ajustes.`)}
+            onPress={async () => {
+              if (item.sourceUrl) {
+                try {
+                  await Linking.openURL(item.sourceUrl);
+                } catch {
+                  Alert.alert("Não foi possível abrir o link", item.sourceUrl);
+                }
+              } else {
+                Alert.alert(
+                  item.title,
+                  `${item.organization}\n${item.city}\n\nO link oficial ainda não está disponível para esta oportunidade.`
+                );
+              }
+            }}
             style={({ pressed }) => [
               styles.opportunityCard,
               { backgroundColor: colors.surface, borderColor: item.featured ? colors.primary : colors.border },
@@ -226,14 +214,16 @@ const styles = StyleSheet.create({
   topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 18 },
   eyebrow: { fontSize: 11, fontWeight: "800", letterSpacing: 1.5 },
   greeting: { fontSize: 27, fontWeight: "800", marginTop: 5, letterSpacing: -0.7 },
-  dedication: { fontSize: 13, fontWeight: "800", marginTop: 7, letterSpacing: 0.1 },
+  authorBlock: { alignItems: "flex-start", marginTop: 10 },
+  authorPhotoSpace: { width: 62, height: 48, borderRadius: 13, borderWidth: 1, marginBottom: 5 },
+  dedication: { fontSize: 13, fontWeight: "800", letterSpacing: 0.1 },
   liveDot: { width: 42, height: 42, borderRadius: 15, alignItems: "center", justifyContent: "center", shadowColor: "#123", shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 3 },
-  heroCard: { borderRadius: 26, padding: 21, minHeight: 166, flexDirection: "row", overflow: "hidden", shadowColor: "#0F766E", shadowOpacity: 0.2, shadowRadius: 15, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
+  heroCard: { borderRadius: 26, padding: 21, minHeight: 166, flexDirection: "row", overflow: "hidden", shadowColor: "#1D4ED8", shadowOpacity: 0.2, shadowRadius: 15, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
   heroCopy: { flex: 1, paddingRight: 10 },
-  heroKicker: { color: "#B9FFF5", fontSize: 10, fontWeight: "800", letterSpacing: 1.4, marginBottom: 10 },
+  heroKicker: { color: "#DBEAFE", fontSize: 10, fontWeight: "800", letterSpacing: 1.4, marginBottom: 10 },
   heroTitle: { color: "#FFFFFF", fontSize: 24, lineHeight: 29, fontWeight: "800", letterSpacing: -0.5 },
-  heroBody: { color: "#D9FFFB", fontSize: 13, lineHeight: 19, marginTop: 10 },
-  heroBadge: { width: 52, height: 52, borderRadius: 18, backgroundColor: "#DDFCF8", alignItems: "center", justifyContent: "center", marginTop: 3 },
+  heroBody: { color: "#E8F1FF", fontSize: 13, lineHeight: 19, marginTop: 10 },
+  heroBadge: { width: 52, height: 52, borderRadius: 18, backgroundColor: "#DBEAFE", alignItems: "center", justifyContent: "center", marginTop: 3 },
   infoStrip: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginTop: 15, paddingHorizontal: 3 },
   infoText: { flex: 1, fontSize: 12, lineHeight: 17 },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginTop: 25, marginBottom: 13 },

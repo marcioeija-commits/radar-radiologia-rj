@@ -15,6 +15,20 @@
       "when": 1789824458594,
       "tag": "0001_goofy_doomsday",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1790352340918,
+      "tag": "0002_add_monitor_run_metrics",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1790356930762,
+      "tag": "0003_secure_installations",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import { useColors } from "@/hooks/use-colors";
 import { startOAuthLogin } from "@/constants/oauth";
 import { useAuth } from "@/hooks/use-auth";
 import { trpc } from "@/lib/trpc";
+import { getExistingInstallationCredentials } from "@/lib/installation";
 
 const SETTINGS_KEY = "radar-settings";
 
@@ -34,41 +35,120 @@ export default function SettingsScreen() {
   const { user } = useAuth({ autoFetch: true });
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const remotePreferences = trpc.monitoring.preferences.get.useQuery(undefined, { enabled: Boolean(user), retry: false });
-  const saveRemotePreferences = trpc.monitoring.preferences.save.useMutation();
+  const getDevicePreferences = trpc.monitoring.devices.getInstallationPreferences.useMutation();
+  const saveDevicePreferences = trpc.monitoring.devices.saveInstallationPreferences.useMutation();
+  const linkInstallation = trpc.monitoring.devices.linkInstallation.useMutation();
+  const unlinkInstallation = trpc.monitoring.devices.unlinkInstallation.useMutation();
+  const [isLinked, setIsLinked] = useState(false);
+  const getDevicePreferencesAsync = getDevicePreferences.mutateAsync;
 
   useEffect(() => {
-    AsyncStorage.getItem(SETTINGS_KEY).then((value) => {
-      if (value) setSettings({ ...defaultSettings, ...JSON.parse(value) });
+    let active = true;
+    void (async () => {
+      const value = await AsyncStorage.getItem(SETTINGS_KEY);
+      if (value && active) setSettings({ ...defaultSettings, ...JSON.parse(value) });
+      const credentials = await getExistingInstallationCredentials();
+      if (!credentials) return;
+      try {
+        const remote = await getDevicePreferencesAsync(credentials);
+        if (!active) return;
+        const next = {
+          concursos: remote.concursos,
+          processos: remote.processos,
+          vagas: remote.vagas,
+          tecnico: remote.tecnico,
+          tecnologo: remote.tecnologo,
+          todoEstado: remote.todoEstado,
+        };
+        setSettings(next);
+        setIsLinked(remote.linked);
+        await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+      } catch {
+        // Device may not be registered yet; local preferences remain available.
+      }
+    })();
+    return () => { active = false; };
+  }, [getDevicePreferencesAsync]);
+
+  useEffect(() => {
+    let active = true;
+    void getExistingInstallationCredentials().then(async (credentials) => {
+      if (!credentials) return;
+      try {
+        const remote = await getDevicePreferencesAsync(credentials);
+        if (active) setIsLinked(remote.linked);
+      } catch {
+        if (active) setIsLinked(false);
+      }
     });
-  }, []);
-
-  useEffect(() => {
-    if (!remotePreferences.data) return;
-    const next = {
-      concursos: remotePreferences.data.concursos,
-      processos: remotePreferences.data.processos,
-      vagas: remotePreferences.data.vagas,
-      tecnico: remotePreferences.data.tecnico,
-      tecnologo: remotePreferences.data.tecnologo,
-      todoEstado: remotePreferences.data.todoEstado,
-    };
-    setSettings(next);
-    void AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
-  }, [remotePreferences.data]);
+    return () => { active = false; };
+  }, [user, getDevicePreferencesAsync]);
 
   const updateSetting = async (key: keyof Settings, value: boolean) => {
     const next = { ...settings, [key]: value };
     setSettings(next);
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
-    if (user) await saveRemotePreferences.mutateAsync(next);
+    const credentials = await getExistingInstallationCredentials();
+    if (credentials) {
+      try {
+        await saveDevicePreferences.mutateAsync({ ...credentials, preferences: next });
+      } catch (error) {
+        console.warn("[Preferences] Could not save installation preferences remotely", error);
+      }
+    }
   };
 
-  const connectAnotherPhone = async () => {
-    if (user) {
-      Alert.alert("Conta conectada", "Entre com a mesma conta no outro celular para compartilhar suas preferências e alertas.");
+  const connectOrSync = async () => {
+    if (!user) {
+      await startOAuthLogin();
       return;
     }
-    await startOAuthLogin();
+    const credentials = await getExistingInstallationCredentials();
+    if (!credentials) {
+      Alert.alert("Ative as notificações primeiro", "O vínculo opcional fica associado a uma instalação já cadastrada neste aparelho.");
+      return;
+    }
+    const sync = async (syncMode: "account_to_device" | "device_to_account") => {
+      try {
+        if (syncMode === "account_to_device") {
+          const result = await remotePreferences.refetch();
+          if (!result.data) throw new Error("Não foi possível carregar as preferências da conta.");
+          const next = {
+            concursos: result.data.concursos,
+            processos: result.data.processos,
+            vagas: result.data.vagas,
+            tecnico: result.data.tecnico,
+            tecnologo: result.data.tecnologo,
+            todoEstado: result.data.todoEstado,
+          };
+          await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+          setSettings(next);
+        }
+        await linkInstallation.mutateAsync({ ...credentials, syncMode });
+        setIsLinked(true);
+        if (syncMode === "device_to_account") await remotePreferences.refetch();
+        Alert.alert("Sincronização ativada", "As preferências serão sincronizadas entre as instalações vinculadas a esta conta.");
+      } catch (error) {
+        Alert.alert("Não foi possível sincronizar", error instanceof Error ? error.message : String(error));
+      }
+    };
+    Alert.alert("Sincronização opcional", "Escolha quais preferências usar como ponto de partida.", [
+      { text: "Preferências da conta", onPress: () => { void sync("account_to_device"); } },
+      { text: "Preferências deste aparelho", onPress: () => { void sync("device_to_account"); } },
+      { text: "Cancelar", style: "cancel" },
+    ]);
+  };
+
+  const disconnectSync = async () => {
+    const credentials = await getExistingInstallationCredentials();
+    if (!credentials) return;
+    try {
+      await unlinkInstallation.mutateAsync(credentials);
+      setIsLinked(false);
+      Alert.alert("Sincronização desativada", "As preferências deste aparelho continuarão salvas localmente.");
+    } catch (error) {
+      Alert.alert("Não foi possível desvincular", error instanceof Error ? error.message : String(error));
+    }
   };
 
   return (
@@ -78,13 +158,13 @@ export default function SettingsScreen() {
         <Text style={[styles.title, { color: colors.foreground }]}>Ajustes</Text>
         <Text style={[styles.subtitle, { color: colors.muted }]}>Deixe o app atento exatamente ao que importa para a carreira dela.</Text>
 
-        <Pressable onPress={connectAnotherPhone} style={({ pressed }) => [styles.accountCard, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && styles.pressed]}>
+        <Pressable onPress={isLinked ? disconnectSync : connectOrSync} style={({ pressed }) => [styles.accountCard, { backgroundColor: colors.surface, borderColor: colors.border }, pressed && styles.pressed]}>
           <View style={[styles.accountIcon, { backgroundColor: `${colors.primary}18` }]}>
             <IconSymbol name="person.2.fill" size={23} color={colors.primary} />
           </View>
           <View style={styles.accountCopy}>
-            <Text style={[styles.accountTitle, { color: colors.foreground }]}>{user ? "Conta do casal conectada" : "Conectar os dois celulares"}</Text>
-            <Text style={[styles.accountBody, { color: colors.muted }]}>{user ? "Preferências prontas para sincronizar" : "Use a mesma conta no iPhone e no Android"}</Text>
+            <Text style={[styles.accountTitle, { color: colors.foreground }]}>{isLinked ? "Sincronização ativada" : "Sincronizar preferências (opcional)"}</Text>
+            <Text style={[styles.accountBody, { color: colors.muted }]}>{isLinked ? "Toque para desvincular este aparelho" : user ? "Escolha se quer vincular esta instalação" : "Faça login somente se quiser sincronizar"}</Text>
           </View>
           <IconSymbol name="chevron.right" size={18} color={colors.muted} />
         </Pressable>
@@ -149,10 +229,10 @@ const styles = StyleSheet.create({
   settingLabel: { fontSize: 14, fontWeight: "800" },
   settingDescription: { fontSize: 11, lineHeight: 16, marginTop: 4 },
   regionCard: { flexDirection: "row", alignItems: "center", borderRadius: 19, padding: 15, gap: 11 },
-  regionIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#DDFCF8", alignItems: "center", justifyContent: "center" },
+  regionIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#DBEAFE", alignItems: "center", justifyContent: "center" },
   regionCopy: { flex: 1 },
   regionTitle: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
-  regionBody: { color: "#D9FFFB", fontSize: 10, lineHeight: 15, marginTop: 4 },
+  regionBody: { color: "#E8F1FF", fontSize: 10, lineHeight: 15, marginTop: 4 },
   sourceNote: { flexDirection: "row", gap: 9, alignItems: "flex-start", padding: 13, borderRadius: 15, borderWidth: 1, marginTop: 17 },
   sourceNoteText: { flex: 1, fontSize: 11, lineHeight: 16 },
   pressed: { opacity: 0.72, transform: [{ scale: 0.985 }] },

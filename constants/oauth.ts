@@ -13,7 +13,7 @@ const env = {
   appId: process.env.EXPO_PUBLIC_APP_ID ?? "",
   ownerId: process.env.EXPO_PUBLIC_OWNER_OPEN_ID ?? "",
   ownerName: process.env.EXPO_PUBLIC_OWNER_NAME ?? "",
-  apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? "",
+  apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL?.trim() ?? "",
   deepLinkScheme: schemeFromBundleId,
 };
 
@@ -45,7 +45,13 @@ export function getApiBaseUrl(): string {
     }
   }
 
-  // Fallback to empty (will use relative URL)
+  if (ReactNative.Platform.OS !== "web") {
+    throw new Error(
+      "Configuração ausente: defina EXPO_PUBLIC_API_BASE_URL com a URL acessível do backend para Android/iOS.",
+    );
+  }
+
+  // Web can use a relative URL when the API shares the same origin.
   return "";
 }
 

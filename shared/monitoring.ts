@@ -12,6 +12,7 @@ export type Opportunity = {
   published: string;
   deadline: string;
   source: string;
+  sourceUrl?: string;
   featured?: boolean;
 };
 

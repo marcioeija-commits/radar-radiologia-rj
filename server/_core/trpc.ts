@@ -10,6 +10,27 @@ const t = initTRPC.context<TrpcContext>().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
+const publicReadRateBuckets = new Map<string, { count: number; expiresAt: number }>();
+export const publicReadProcedure = t.procedure.use(t.middleware(async ({ ctx, next }) => {
+  const now = Date.now();
+  const ip = ctx.req.ip || ctx.req.socket.remoteAddress || "unknown";
+  let bucket = publicReadRateBuckets.get(ip);
+  if (!bucket || bucket.expiresAt <= now) {
+    bucket = { count: 0, expiresAt: now + 60_000 };
+    publicReadRateBuckets.set(ip, bucket);
+  }
+  bucket.count += 1;
+  if (bucket.count > 120) {
+    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Limite temporário de consultas atingido" });
+  }
+  if (publicReadRateBuckets.size > 10_000) {
+    for (const [key, value] of publicReadRateBuckets) {
+      if (value.expiresAt <= now) publicReadRateBuckets.delete(key);
+    }
+  }
+  return next();
+}));
+
 const requireUser = t.middleware(async (opts) => {
   const { ctx, next } = opts;
 

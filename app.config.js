@@ -4,7 +4,7 @@ const scheme = "manusradarradiologiarj";
 module.exports = {
   name: "Radar Radiologia RJ",
   slug: "radar-radiologia-rj",
-  version: "1.0.0",
+  version: "1.0.2",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme,
@@ -18,6 +18,7 @@ module.exports = {
     },
   },
   android: {
+    googleServicesFile: "./google-services.json",
     adaptiveIcon: {
       backgroundColor: "#E6F4FE",
       foregroundImage: "./assets/images/android-icon-foreground.png",
@@ -44,24 +45,13 @@ module.exports = {
   },
   plugins: [
     "expo-router",
+    "expo-font",
+    "expo-web-browser",
     [
       "expo-notifications",
       {
         icon: "./assets/images/icon.png",
-        color: "#0F766E",
-      },
-    ],
-    [
-      "expo-audio",
-      {
-        microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
-      },
-    ],
-    [
-      "expo-video",
-      {
-        supportsBackgroundPlayback: true,
-        supportsPictureInPicture: true,
+        color: "#2563EB",
       },
     ],
     [

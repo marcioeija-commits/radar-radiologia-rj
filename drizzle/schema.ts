@@ -1,4 +1,4 @@
-import { boolean, index, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { boolean, char, index, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -67,17 +67,36 @@ export const pushDevices = mysqlTable("push_devices", {
   enabled: boolean("enabled").default(true).notNull(),
   lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  installationId: varchar("installationId", { length: 128 }),
+  credentialHash: char("credentialHash", { length: 64 }),
+  linkedUserId: int("linkedUserId"),
 }, (table) => ({
   userTokenUnique: uniqueIndex("push_devices_user_token_unique").on(table.userId, table.token),
+  installationIdUnique: uniqueIndex("push_devices_installationId_unique").on(table.installationId),
+  linkedUserIdIndex: index("push_devices_linkedUserId_idx").on(table.linkedUserId),
 }));
+
+export const deviceAlertPreferences = mysqlTable("device_alert_preferences", {
+  installationId: varchar("installationId", { length: 128 }).primaryKey(),
+  concursos: boolean("concursos").default(true).notNull(),
+  processos: boolean("processos").default(true).notNull(),
+  vagas: boolean("vagas").default(true).notNull(),
+  tecnico: boolean("tecnico").default(true).notNull(),
+  tecnologo: boolean("tecnologo").default(true).notNull(),
+  todoEstado: boolean("todoEstado").default(true).notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
 
 export const monitorRuns = mysqlTable("monitor_runs", {
   id: int("id").autoincrement().primaryKey(),
   sourceId: int("sourceId").notNull(),
+  url: varchar("url", { length: 1000 }).default("").notNull(),
   startedAt: timestamp("startedAt").defaultNow().notNull(),
   finishedAt: timestamp("finishedAt"),
   status: mysqlEnum("status", ["running", "success", "failed"]).notNull(),
+  httpStatus: int("httpStatus"),
   foundCount: int("foundCount").default(0).notNull(),
+  durationMs: int("durationMs").default(0).notNull(),
   error: text("error"),
 }, (table) => ({
   sourceStartedIndex: index("monitor_runs_source_started_idx").on(table.sourceId, table.startedAt),
@@ -90,4 +109,5 @@ export type InsertMonitorSource = typeof monitorSources.$inferInsert;
 export type Opportunity = typeof opportunities.$inferSelect;
 export type InsertOpportunity = typeof opportunities.$inferInsert;
 export type AlertPreference = typeof alertPreferences.$inferSelect;
+export type DeviceAlertPreference = typeof deviceAlertPreferences.$inferSelect;
 export type PushDevice = typeof pushDevices.$inferSelect;

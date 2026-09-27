@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -15,6 +15,7 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
 import { filterOpportunities, ROLE_FILTERS, type Opportunity, type RoleFilter } from "@/shared/monitoring";
 import { trpc } from "@/lib/trpc";
+import { getFavoriteIds, setFavorite } from "@/lib/favorites";
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -22,6 +23,17 @@ export default function HomeScreen() {
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("Todos");
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState("agora");
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    getFavoriteIds().then((ids) => {
+      if (active) setFavoriteIds(ids);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const opportunities = useMemo<Opportunity[]>(() => {
     if (!liveQuery.data?.length) return [];
@@ -39,6 +51,12 @@ export default function HomeScreen() {
     }));
   }, [liveQuery.data]);
   const filteredOpportunities = useMemo(() => filterOpportunities(opportunities, roleFilter), [opportunities, roleFilter]);
+
+  const toggleFavorite = async (id: string) => {
+    const isCurrentlyFavorite = favoriteIds.includes(id);
+    const next = await setFavorite(id, !isCurrentlyFavorite);
+    setFavoriteIds(next);
+  };
 
   const refresh = async () => {
     setRefreshing(true);
@@ -161,7 +179,10 @@ export default function HomeScreen() {
               } else {
                 Alert.alert(
                   item.title,
-                  `${item.organization}\n${item.city}\n\nO link oficial ainda não está disponível para esta oportunidade.`
+                  `${item.organization}
+${item.city}
+
+O link oficial ainda não está disponível para esta oportunidade.`
                 );
               }
             }}
@@ -175,7 +196,12 @@ export default function HomeScreen() {
               <View style={[styles.kindPill, { backgroundColor: item.kind === "Concurso" ? `${colors.primary}18` : `${colors.warning}1A` }]}>
                 <Text style={[styles.kindText, { color: item.kind === "Concurso" ? colors.primary : colors.warning }]}>{item.kind}</Text>
               </View>
-              <IconSymbol name="chevron.right" size={18} color={colors.muted} />
+              <View style={styles.cardActions}>
+                <Pressable onPress={(event) => { event.stopPropagation(); void toggleFavorite(item.id); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={favoriteIds.includes(item.id) ? "Remover dos favoritos" : "Adicionar aos favoritos"}>
+                  <IconSymbol name="star.fill" size={20} color={favoriteIds.includes(item.id) ? colors.warning : colors.muted} />
+                </Pressable>
+                <IconSymbol name="chevron.right" size={18} color={colors.muted} />
+              </View>
             </View>
             <Text style={[styles.opportunityTitle, { color: colors.foreground }]}>{item.title}</Text>
             <Text style={[styles.organization, { color: colors.muted }]}>{item.organization}</Text>
@@ -241,6 +267,7 @@ const styles = StyleSheet.create({
   updated: { fontSize: 11, marginBottom: 11 },
   opportunityCard: { borderRadius: 20, borderWidth: 1, padding: 16, marginBottom: 12, shadowColor: "#0A3332", shadowOpacity: 0.05, shadowRadius: 7, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   cardTopLine: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  cardActions: { flexDirection: "row", alignItems: "center", gap: 6 },
   kindPill: { borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5 },
   kindText: { fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.7 },
   opportunityTitle: { fontSize: 18, fontWeight: "800", letterSpacing: -0.2 },

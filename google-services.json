@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "485888978114",
+    "project_id": "radar-radiologia-rj",
+    "storage_bucket": "radar-radiologia-rj.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:485888978114:android:69d2e19af23c381cc85f5b",
+        "android_client_info": {
+          "package_name": "com.app.radarradiologiarj"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCvoFsDVTieRpAcHjBrYBWTmGmDviof-KQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

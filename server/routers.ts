@@ -21,6 +21,10 @@ export const appRouter = router({
       await db.ensureMonitorSources();
       return db.listMonitorSources();
     }),
+    appVersion: publicProcedure.query(() => ({
+      version: "1.0.3",
+      androidApkUrl: "https://github.com/marcioeija-commits/radar-radiologia-rj/releases/latest",
+    })),
   }),
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),

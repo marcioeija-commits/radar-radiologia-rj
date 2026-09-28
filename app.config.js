@@ -4,7 +4,7 @@ const scheme = "manusradarradiologiarj";
 module.exports = {
   name: "Radar Radiologia RJ",
   slug: "radar-radiologia-rj",
-  version: "1.0.2",
+  version: "1.0.3",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme,

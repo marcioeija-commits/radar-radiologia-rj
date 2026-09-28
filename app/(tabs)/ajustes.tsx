@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { useEffect, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -41,7 +41,10 @@ export default function SettingsScreen() {
   const linkInstallation = trpc.monitoring.devices.linkInstallation.useMutation();
   const unlinkInstallation = trpc.monitoring.devices.unlinkInstallation.useMutation();
   const [isLinked, setIsLinked] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "current" | "error">("idle");
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const getDevicePreferencesAsync = getDevicePreferences.mutateAsync;
+  const appVersionQuery = trpc.system.appVersion.useQuery(undefined, { enabled: false, retry: false });
 
   useEffect(() => {
     let active = true;
@@ -140,6 +143,52 @@ export default function SettingsScreen() {
     ]);
   };
 
+  const checkForUpdate = async () => {
+    setUpdateStatus("checking");
+    setLatestVersion(null);
+
+    try {
+      const result = await appVersionQuery.refetch();
+      const remoteVersion = result.data?.version;
+
+      if (!remoteVersion) {
+        throw new Error("Versão disponível não informada.");
+      }
+
+      setLatestVersion(remoteVersion);
+
+      const currentVersion = Constants.expoConfig?.version ?? "1.0.2";
+      const current = currentVersion.split(".").map(Number);
+      const latest = remoteVersion.split(".").map(Number);
+
+      const hasUpdate = latest.some((part, index) => {
+        const currentPart = current[index] ?? 0;
+        return part > currentPart;
+      }) || latest.length > current.length;
+
+      setUpdateStatus(hasUpdate ? "available" : "current");
+    } catch (error) {
+      console.warn("[Update] Could not check for updates", error);
+      setUpdateStatus("error");
+    }
+  };
+
+  const openUpdate = async () => {
+    try {
+      const result = await appVersionQuery.refetch();
+      const url = result.data?.androidApkUrl;
+
+      if (!url) {
+        Alert.alert("Atualização indisponível", "O endereço da nova versão não está disponível.");
+        return;
+      }
+
+      await Linking.openURL(url);
+    } catch (error) {
+      Alert.alert("Não foi possível abrir", error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const disconnectSync = async () => {
     const credentials = await getExistingInstallationCredentials();
     if (!credentials) return;
@@ -198,6 +247,51 @@ export default function SettingsScreen() {
           <Text style={[styles.sourceNoteText, { color: colors.muted }]}>As fontes oficiais serão conectadas na próxima etapa do app. Até lá, esta tela já guarda seus filtros neste celular.</Text>
         </View>
 
+        <View style={[styles.updateCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={styles.updateCopy}>
+            <Text style={[styles.updateTitle, { color: colors.foreground }]}>Atualização do aplicativo</Text>
+            <Text style={[styles.updateBody, { color: colors.muted }]}>
+              {updateStatus === "checking"
+                ? "Verificando se existe uma versão mais nova..."
+                : updateStatus === "available"
+                  ? `Nova versão ${latestVersion} disponível.`
+                  : updateStatus === "current"
+                    ? "Seu aplicativo já está atualizado."
+                    : updateStatus === "error"
+                      ? "Não foi possível verificar agora."
+                      : "Confira se existe uma versão mais nova do Radar."}
+            </Text>
+          </View>
+
+          {updateStatus === "available" ? (
+            <Pressable
+              onPress={() => { void openUpdate(); }}
+              style={({ pressed }) => [
+                styles.updateButton,
+                { backgroundColor: colors.primary },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.updateButtonText}>Atualizar agora</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={() => { void checkForUpdate(); }}
+              disabled={updateStatus === "checking"}
+              style={({ pressed }) => [
+                styles.updateButton,
+                { backgroundColor: colors.primary },
+                updateStatus === "checking" && styles.disabledButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.updateButtonText}>
+                {updateStatus === "checking" ? "Verificando..." : "Verificar atualização"}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+
         <View style={styles.versionBlock}>
           <Text style={[styles.versionLabel, { color: colors.muted }]}>Versão do aplicativo</Text>
           <Text style={[styles.versionValue, { color: colors.foreground }]}>
@@ -243,6 +337,39 @@ const styles = StyleSheet.create({
   regionBody: { color: "#E8F1FF", fontSize: 10, lineHeight: 15, marginTop: 4 },
   sourceNote: { flexDirection: "row", gap: 9, alignItems: "flex-start", padding: 13, borderRadius: 15, borderWidth: 1, marginTop: 17 },
   sourceNoteText: { flex: 1, fontSize: 11, lineHeight: 16 },
+  updateCard: {
+    borderWidth: 1,
+    borderRadius: 19,
+    padding: 15,
+    marginTop: 24,
+  },
+  updateCopy: {
+    marginBottom: 13,
+  },
+  updateTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  updateBody: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  updateButton: {
+    minHeight: 44,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 15,
+  },
+  updateButtonText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
   versionBlock: { alignItems: "center", marginTop: 18, paddingBottom: 8 },
   versionLabel: { fontSize: 10, fontWeight: "600", letterSpacing: 0.4 },
   versionValue: { fontSize: 12, fontWeight: "800", marginTop: 3 },

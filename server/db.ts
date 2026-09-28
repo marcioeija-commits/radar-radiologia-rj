@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, inArray, isNull, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, isNotNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   alertPreferences,
@@ -188,7 +188,7 @@ export async function listRecentOpportunities(limit = 50) {
     publishedAt: opportunities.publishedAt,
     deadlineAt: opportunities.deadlineAt,
     summary: opportunities.summary,
-  }).from(opportunities).where(eq(opportunities.isActive, true)).orderBy(desc(opportunities.publishedAt), desc(opportunities.createdAt)).limit(Math.min(Math.max(limit, 1), 100));
+  }).from(opportunities).where(and(eq(opportunities.isActive, true), or(isNull(opportunities.publishedAt), gte(opportunities.publishedAt, new Date(Date.now() - 120 * 24 * 60 * 60 * 1000))), or(isNull(opportunities.deadlineAt), gte(opportunities.deadlineAt, new Date())))).orderBy(desc(opportunities.publishedAt), desc(opportunities.createdAt)).limit(Math.min(Math.max(limit, 1), 100));
 }
 
 export async function getAlertPreferences(userId: number): Promise<AlertPreference> {

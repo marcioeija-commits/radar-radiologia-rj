@@ -16,6 +16,15 @@ const ROLE_TERMS = [
 const OPPORTUNITY_TERMS = ["concurso", "processo seletivo", "processo de seleção", "vaga", "vagas", "edital", "convocação", "convocacoes", "contratação", "contratacao", "seleção", "selecao", "estágio", "estagio"];
 const EXCLUDED_TERMS = ["termo de referência", "termo de referencia", "estudo técnico preliminar", "estudo tecnico preliminar", "pesquisa de preço", "pesquisa de preco", "contratação de serviço", "contratacao de servico"];
 
+const OPPORTUNITY_MAX_AGE_MS = 120 * 24 * 60 * 60 * 1000;
+
+function isCurrentOpportunity(candidate: MonitorCandidate): boolean {
+  const now = Date.now();
+  if (candidate.deadlineAt && candidate.deadlineAt.getTime() < now) return false;
+  if (candidate.publishedAt && candidate.publishedAt.getTime() < now - OPPORTUNITY_MAX_AGE_MS) return false;
+  return true;
+}
+
 export type MonitorCandidate = {
   externalId: string;
   title: string;
@@ -235,6 +244,8 @@ export async function runMonitoringCycle() {
           const candidates = extractCandidates(html, url, source.name);
 
           for (const candidate of candidates) {
+            if (!isCurrentOpportunity(candidate)) continue;
+
             const result = await db.upsertOpportunity({
               sourceId: source.id,
               externalId: candidate.externalId,

@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 import { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 
@@ -196,6 +197,13 @@ export default function SettingsScreen() {
           <IconSymbol name="lock.shield.fill" size={19} color={colors.warning} />
           <Text style={[styles.sourceNoteText, { color: colors.muted }]}>As fontes oficiais serão conectadas na próxima etapa do app. Até lá, esta tela já guarda seus filtros neste celular.</Text>
         </View>
+
+        <View style={styles.versionBlock}>
+          <Text style={[styles.versionLabel, { color: colors.muted }]}>Versão do aplicativo</Text>
+          <Text style={[styles.versionValue, { color: colors.foreground }]}>
+            {Constants.expoConfig?.version ?? "1.0.2"}
+          </Text>
+        </View>
       </ScrollView>
     </ScreenContainer>
   );
@@ -235,5 +243,8 @@ const styles = StyleSheet.create({
   regionBody: { color: "#E8F1FF", fontSize: 10, lineHeight: 15, marginTop: 4 },
   sourceNote: { flexDirection: "row", gap: 9, alignItems: "flex-start", padding: 13, borderRadius: 15, borderWidth: 1, marginTop: 17 },
   sourceNoteText: { flex: 1, fontSize: 11, lineHeight: 16 },
+  versionBlock: { alignItems: "center", marginTop: 18, paddingBottom: 8 },
+  versionLabel: { fontSize: 10, fontWeight: "600", letterSpacing: 0.4 },
+  versionValue: { fontSize: 12, fontWeight: "800", marginTop: 3 },
   pressed: { opacity: 0.72, transform: [{ scale: 0.985 }] },
 });

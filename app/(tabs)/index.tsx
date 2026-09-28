@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Animated,
   FlatList,
   Pressable,
   RefreshControl,
@@ -29,6 +30,7 @@ export default function HomeScreen() {
   const [viewedIds, setViewedIds] = useState<string[]>([]);
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [viewFilter, setViewFilter] = useState<"Todas" | "Não vistas" | "Vistas" | "Favoritos">("Todas");
+  const [bellAnimation] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     let active = true;
@@ -80,6 +82,40 @@ export default function HomeScreen() {
       return true;
     });
   }, [opportunities, roleFilter, viewFilter, viewedIds, favoriteIds, deletedIds]);
+
+  const hasUnreadOpportunities = opportunities.some(
+    (item) => !viewedIds.includes(item.id) && !deletedIds.includes(item.id),
+  );
+
+  const bellRotation = bellAnimation.interpolate({
+    inputRange: [-1, 1],
+    outputRange: ["-14deg", "14deg"],
+  });
+
+  useEffect(() => {
+    if (!hasUnreadOpportunities) {
+      bellAnimation.stopAnimation();
+      bellAnimation.setValue(0);
+      return;
+    }
+
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(bellAnimation, { toValue: -1, duration: 90, useNativeDriver: true }),
+        Animated.timing(bellAnimation, { toValue: 1, duration: 90, useNativeDriver: true }),
+        Animated.timing(bellAnimation, { toValue: -1, duration: 90, useNativeDriver: true }),
+        Animated.timing(bellAnimation, { toValue: 1, duration: 90, useNativeDriver: true }),
+        Animated.timing(bellAnimation, { toValue: 0, duration: 140, useNativeDriver: true }),
+        Animated.delay(700),
+      ]),
+    );
+
+    animation.start();
+
+    return () => {
+      animation.stop();
+    };
+  }, [hasUnreadOpportunities, bellAnimation]);
 
   const toggleFavorite = async (id: string) => {
     const isCurrentlyFavorite = favoriteIds.includes(id);
@@ -134,13 +170,15 @@ export default function HomeScreen() {
             <View style={styles.topRow}>
               <View>
                 <Text style={[styles.eyebrow, { color: colors.primary }]}>RADAR RADIOLOGIA RJ</Text>
-                <Text style={[styles.greeting, { color: colors.foreground }]}>Oportunidades para ela</Text>
+                <Text style={[styles.greeting, { color: colors.foreground }]}>OPORTUNIDADES PARA CÍNTIA</Text>
                 <View style={styles.authorBlock}>
                   <Text style={[styles.dedication, { color: colors.primary }]}>Criado por Márcio Negão</Text>
                 </View>
               </View>
               <View style={[styles.liveDot, { backgroundColor: colors.success }]}>
-                <IconSymbol name="bell.fill" size={19} color="#FFFFFF" />
+                <Animated.View style={{ transform: [{ rotate: bellRotation }] }}>
+                  <IconSymbol name="bell.fill" size={19} color="#FFFFFF" />
+                </Animated.View>
               </View>
             </View>
 
@@ -236,29 +274,10 @@ export default function HomeScreen() {
           </View>
         }
         renderItem={({ item }) => (
-          <Pressable
-            onPress={async () => {
-              await markOpportunityAsViewed(item.id);
-              if (item.sourceUrl) {
-                try {
-                  await Linking.openURL(item.sourceUrl);
-                } catch {
-                  Alert.alert("Não foi possível abrir o link", item.sourceUrl);
-                }
-              } else {
-                Alert.alert(
-                  item.title,
-                  `${item.organization}
-${item.city}
-
-O link oficial ainda não está disponível para esta oportunidade.`
-                );
-              }
-            }}
-            style={({ pressed }) => [
+          <View
+            style={[
               styles.opportunityCard,
               { backgroundColor: colors.surface, borderColor: item.featured ? colors.primary : colors.border },
-              pressed && styles.pressed,
             ]}
           >
             <View style={styles.cardTopLine}>
@@ -275,23 +294,45 @@ O link oficial ainda não está disponível para esta oportunidade.`
                 <IconSymbol name="chevron.right" size={18} color={colors.muted} />
               </View>
             </View>
-            <Text style={[styles.opportunityTitle, { color: colors.foreground }]}>{item.title}</Text>
-            <Text style={[styles.organization, { color: colors.muted }]}>{item.organization}</Text>
-            <View style={styles.metaRow}>
-              <View style={styles.metaItem}>
-                <IconSymbol name="mappin.and.ellipse" size={15} color={colors.primary} />
-                <Text style={[styles.metaText, { color: colors.muted }]}>{item.city}</Text>
+            <Pressable
+              onPress={async () => {
+                await markOpportunityAsViewed(item.id);
+                if (item.sourceUrl) {
+                  try {
+                    await Linking.openURL(item.sourceUrl);
+                  } catch {
+                    Alert.alert("Não foi possível abrir o link", item.sourceUrl);
+                  }
+                } else {
+                  Alert.alert(
+                    item.title,
+                    `${item.organization}
+${item.city}
+
+O link oficial ainda não está disponível para esta oportunidade.`
+                  );
+                }
+              }}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
+              <Text style={[styles.opportunityTitle, { color: colors.foreground }]}>{item.title}</Text>
+              <Text style={[styles.organization, { color: colors.muted }]}>{item.organization}</Text>
+              <View style={styles.metaRow}>
+                <View style={styles.metaItem}>
+                  <IconSymbol name="mappin.and.ellipse" size={15} color={colors.primary} />
+                  <Text style={[styles.metaText, { color: colors.muted }]}>{item.city}</Text>
+                </View>
+                <View style={styles.metaItem}>
+                  <IconSymbol name="calendar" size={15} color={colors.primary} />
+                  <Text style={[styles.metaText, { color: colors.muted }]}>{item.deadline}</Text>
+                </View>
               </View>
-              <View style={styles.metaItem}>
-                <IconSymbol name="calendar" size={15} color={colors.primary} />
-                <Text style={[styles.metaText, { color: colors.muted }]}>{item.deadline}</Text>
+              <View style={[styles.cardFooter, { borderTopColor: colors.border }]}>
+                <Text style={[styles.sourceText, { color: colors.muted }]}>{item.source}</Text>
+                <Text style={[styles.publishedText, { color: colors.primary }]}>{item.published}</Text>
               </View>
-            </View>
-            <View style={[styles.cardFooter, { borderTopColor: colors.border }]}>
-              <Text style={[styles.sourceText, { color: colors.muted }]}>{item.source}</Text>
-              <Text style={[styles.publishedText, { color: colors.primary }]}>{item.published}</Text>
-            </View>
-          </Pressable>
+            </Pressable>
+          </View>
         )}
         ListFooterComponent={
           <View style={[styles.footerNote, { backgroundColor: colors.surface, borderColor: colors.border }]}>

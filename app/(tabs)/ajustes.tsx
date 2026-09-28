@@ -40,10 +40,36 @@ export default function SettingsScreen() {
   const saveDevicePreferences = trpc.monitoring.devices.saveInstallationPreferences.useMutation();
   const linkInstallation = trpc.monitoring.devices.linkInstallation.useMutation();
   const unlinkInstallation = trpc.monitoring.devices.unlinkInstallation.useMutation();
+  const testNotification = trpc.monitoring.devices.testNotification.useMutation();
   const [isLinked, setIsLinked] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "current" | "error">("idle");
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const getDevicePreferencesAsync = getDevicePreferences.mutateAsync;
+
+  const sendTestNotification = async () => {
+    const credentials = await getExistingInstallationCredentials();
+
+    if (!credentials) {
+      Alert.alert(
+        "Ative as notificações primeiro",
+        "Este aparelho ainda não foi cadastrado para receber notificações."
+      );
+      return;
+    }
+
+    try {
+      await testNotification.mutateAsync(credentials);
+      Alert.alert(
+        "Teste enviado",
+        "A notificação de teste foi enviada para este aparelho."
+      );
+    } catch (error) {
+      Alert.alert(
+        "Não foi possível enviar o teste",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -276,6 +302,30 @@ export default function SettingsScreen() {
           <Text style={[styles.sourceNoteText, { color: colors.muted }]}>As fontes oficiais serão conectadas na próxima etapa do app. Até lá, esta tela já guarda seus filtros neste celular.</Text>
         </View>
 
+        <View style={[styles.testNotificationCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={styles.testNotificationCopy}>
+            <Text style={[styles.testNotificationTitle, { color: colors.foreground }]}>Teste de notificação</Text>
+            <Text style={[styles.testNotificationBody, { color: colors.muted }]}>
+              Envie uma notificação real para confirmar que este aparelho está recebendo os alertas.
+            </Text>
+          </View>
+
+          <Pressable
+            onPress={() => { void sendTestNotification(); }}
+            disabled={testNotification.isPending}
+            style={({ pressed }) => [
+              styles.testNotificationButton,
+              { backgroundColor: colors.primary },
+              testNotification.isPending && styles.disabledButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.updateButtonText}>
+              {testNotification.isPending ? "Enviando..." : "Testar notificação"}
+            </Text>
+          </Pressable>
+        </View>
+
         <View style={[styles.updateCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.updateCopy}>
             <Text style={[styles.updateTitle, { color: colors.foreground }]}>Atualização do aplicativo</Text>
@@ -366,6 +416,31 @@ const styles = StyleSheet.create({
   regionBody: { color: "#E8F1FF", fontSize: 10, lineHeight: 15, marginTop: 4 },
   sourceNote: { flexDirection: "row", gap: 9, alignItems: "flex-start", padding: 13, borderRadius: 15, borderWidth: 1, marginTop: 17 },
   sourceNoteText: { flex: 1, fontSize: 11, lineHeight: 16 },
+  testNotificationCard: {
+    borderWidth: 1,
+    borderRadius: 19,
+    padding: 15,
+    marginTop: 24,
+  },
+  testNotificationCopy: {
+    marginBottom: 13,
+  },
+  testNotificationTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  testNotificationBody: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  testNotificationButton: {
+    minHeight: 44,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 15,
+  },
   updateCard: {
     borderWidth: 1,
     borderRadius: 19,

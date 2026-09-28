@@ -480,6 +480,14 @@ export async function listEnabledPushDevices(userIds?: number[]) {
   return db.select().from(pushDevices).where(and(...filters));
 }
 
+export async function getInstallationPushToken(installationId: string, secret: string) {
+  const device = await getAuthorizedInstallation(installationId, secret);
+  if (!device.enabled) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "As notificações estão desativadas neste aparelho" });
+  }
+  return { token: device.token, platform: device.platform } as const;
+}
+
 export async function upsertOpportunity(data: InsertOpportunity) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");

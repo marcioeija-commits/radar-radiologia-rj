@@ -66,6 +66,36 @@ export const appRouter = router({
       setInstallationEnabled: publicProcedure
         .input(z.object({ installationId: z.string().uuid(), secret: z.string().regex(/^[a-f0-9]{64}$/i), enabled: z.boolean() }))
         .mutation(({ input }) => db.setInstallationPushEnabled(input.installationId, input.secret, input.enabled)),
+      testNotification: publicProcedure
+        .input(z.object({ installationId: z.string().uuid(), secret: z.string().regex(/^[a-f0-9]{64}$/i) }))
+        .mutation(async ({ input }) => {
+          const device = await db.getInstallationPushToken(input.installationId, input.secret);
+          const response = await fetch("https://exp.host/--/api/v2/push/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              to: device.token,
+              sound: "default",
+              title: "Radar Radiologia RJ",
+              body: "Teste de notificação recebido com sucesso neste aparelho.",
+              data: { type: "test-notification" },
+            }),
+            signal: AbortSignal.timeout(10_000),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Expo Push API retornou HTTP ${response.status}`);
+          }
+
+          const payload = await response.json() as { data?: { status?: string; message?: string } };
+          const ticket = payload.data;
+
+          if (ticket?.status !== "ok") {
+            throw new Error(ticket?.message || "Expo Push API não confirmou o envio");
+          }
+
+          return { ok: true } as const;
+        }),
       getInstallationPreferences: publicProcedure
         .input(z.object({ installationId: z.string().uuid(), secret: z.string().regex(/^[a-f0-9]{64}$/i) }))
         .mutation(({ ctx, input }) => db.getInstallationPreferences(input.installationId, input.secret, ctx.user?.id)),

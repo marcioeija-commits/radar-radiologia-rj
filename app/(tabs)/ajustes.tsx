@@ -44,7 +44,6 @@ export default function SettingsScreen() {
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "current" | "error">("idle");
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const getDevicePreferencesAsync = getDevicePreferences.mutateAsync;
-  const appVersionQuery = trpc.system.appVersion.useQuery(undefined, { enabled: false, retry: false });
 
   useEffect(() => {
     let active = true;
@@ -148,16 +147,29 @@ export default function SettingsScreen() {
     setLatestVersion(null);
 
     try {
-      const result = await appVersionQuery.refetch();
-      const remoteVersion = result.data?.version;
+      const response = await fetch(
+        "https://api.github.com/repos/marcioeija-commits/radar-radiologia-rj/releases/latest",
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`GitHub respondeu ${response.status}.`);
+      }
+
+      const release = await response.json();
+      const remoteVersion = String(release.tag_name ?? "").replace(/^v/, "");
 
       if (!remoteVersion) {
-        throw new Error("Versão disponível não informada.");
+        throw new Error("A versão da Release não foi informada.");
       }
 
       setLatestVersion(remoteVersion);
 
-      const currentVersion = Constants.expoConfig?.version ?? "1.0.2";
+      const currentVersion = Constants.expoConfig?.version ?? "1.0.3";
       const current = currentVersion.split(".").map(Number);
       const latest = remoteVersion.split(".").map(Number);
 
@@ -175,11 +187,28 @@ export default function SettingsScreen() {
 
   const openUpdate = async () => {
     try {
-      const result = await appVersionQuery.refetch();
-      const url = result.data?.androidApkUrl;
+      const response = await fetch(
+        "https://api.github.com/repos/marcioeija-commits/radar-radiologia-rj/releases/latest",
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`GitHub respondeu ${response.status}.`);
+      }
+
+      const release = await response.json();
+      const apk = Array.isArray(release.assets)
+        ? release.assets.find((asset: { name?: string }) => asset.name?.toLowerCase().endsWith(".apk"))
+        : null;
+
+      const url = apk?.browser_download_url;
 
       if (!url) {
-        Alert.alert("Atualização indisponível", "O endereço da nova versão não está disponível.");
+        Alert.alert("Atualização indisponível", "O APK da nova versão ainda não foi publicado.");
         return;
       }
 

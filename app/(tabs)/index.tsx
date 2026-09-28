@@ -31,6 +31,8 @@ export default function HomeScreen() {
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [viewFilter, setViewFilter] = useState<"Todas" | "Não vistas" | "Vistas" | "Favoritos">("Todas");
   const [bellAnimation] = useState(() => new Animated.Value(0));
+  const [radiologyAnimation] = useState(() => new Animated.Value(0));
+  const [radiologySymbol, setRadiologySymbol] = useState("🩻");
 
   useEffect(() => {
     let active = true;
@@ -91,6 +93,47 @@ export default function HomeScreen() {
     inputRange: [-1, 1],
     outputRange: ["-14deg", "14deg"],
   });
+
+  useEffect(() => {
+    const symbols = ["🩻", "☢️", "🖥️", "🧲", "📡", "▣"];
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const showNext = (index: number) => {
+      if (cancelled) return;
+
+      setRadiologySymbol(symbols[index]);
+      radiologyAnimation.setValue(0);
+
+      Animated.sequence([
+        Animated.timing(radiologyAnimation, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.delay(1400),
+        Animated.timing(radiologyAnimation, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished && !cancelled) {
+          timer = setTimeout(() => {
+            showNext((index + 1) % symbols.length);
+          }, 180);
+        }
+      });
+    };
+
+    showNext(0);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      radiologyAnimation.stopAnimation();
+    };
+  }, [radiologyAnimation]);
 
   useEffect(() => {
     if (!hasUnreadOpportunities) {
@@ -167,6 +210,28 @@ export default function HomeScreen() {
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <View>
+            <View style={styles.radiologyAnimation}>
+              <Animated.Text
+                accessibilityLabel="Símbolo de radiologia"
+                style={[
+                  styles.radiologySymbol,
+                  {
+                    opacity: radiologyAnimation,
+                    transform: [
+                      {
+                        translateY: radiologyAnimation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [10, 0],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                {radiologySymbol}
+              </Animated.Text>
+            </View>
+
             <View style={styles.topRow}>
               <View>
                 <Text style={[styles.eyebrow, { color: colors.primary }]}>RADAR RADIOLOGIA RJ</Text>
@@ -365,6 +430,17 @@ const styles = StyleSheet.create({
   heroBadge: { width: 52, height: 52, borderRadius: 18, backgroundColor: "#DBEAFE", alignItems: "center", justifyContent: "center", marginTop: 3 },
   infoStrip: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginTop: 15, paddingHorizontal: 3 },
   infoText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  radiologyAnimation: {
+    height: 58,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+    overflow: "hidden",
+  },
+  radiologySymbol: {
+    fontSize: 38,
+    textAlign: "center",
+  },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginTop: 25, marginBottom: 13 },
   sectionTitle: { fontSize: 20, fontWeight: "800" },
   sectionSubtitle: { fontSize: 12, marginTop: 4 },

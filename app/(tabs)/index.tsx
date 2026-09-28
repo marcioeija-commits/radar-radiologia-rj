@@ -16,6 +16,8 @@ import { useColors } from "@/hooks/use-colors";
 import { filterOpportunities, ROLE_FILTERS, type Opportunity, type RoleFilter } from "@/shared/monitoring";
 import { trpc } from "@/lib/trpc";
 import { getFavoriteIds, setFavorite } from "@/lib/favorites";
+import { getViewedIds, markAsViewed } from "@/lib/viewed";
+import { getDeletedIds, markAsDeleted } from "@/lib/deleted";
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -24,11 +26,27 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState("agora");
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+  const [viewedIds, setViewedIds] = useState<string[]>([]);
+  const [deletedIds, setDeletedIds] = useState<string[]>([]);
+  const [viewFilter, setViewFilter] = useState<"Todas" | "Não vistas" | "Vistas" | "Favoritos">("Todas");
 
   useEffect(() => {
     let active = true;
     getFavoriteIds().then((ids) => {
       if (active) setFavoriteIds(ids);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([getViewedIds(), getDeletedIds()]).then(([viewed, deleted]) => {
+      if (active) {
+        setViewedIds(viewed);
+        setDeletedIds(deleted);
+      }
     });
     return () => {
       active = false;
@@ -50,12 +68,45 @@ export default function HomeScreen() {
       sourceUrl: item.sourceUrl,
     }));
   }, [liveQuery.data]);
-  const filteredOpportunities = useMemo(() => filterOpportunities(opportunities, roleFilter), [opportunities, roleFilter]);
+  const filteredOpportunities = useMemo(() => {
+    const roleFiltered = filterOpportunities(opportunities, roleFilter);
+    return roleFiltered.filter((item) => {
+      if (deletedIds.includes(item.id)) return false;
+      const viewed = viewedIds.includes(item.id);
+      const favorite = favoriteIds.includes(item.id);
+      if (viewFilter === "Não vistas") return !viewed;
+      if (viewFilter === "Vistas") return viewed;
+      if (viewFilter === "Favoritos") return favorite;
+      return true;
+    });
+  }, [opportunities, roleFilter, viewFilter, viewedIds, favoriteIds, deletedIds]);
 
   const toggleFavorite = async (id: string) => {
     const isCurrentlyFavorite = favoriteIds.includes(id);
     const next = await setFavorite(id, !isCurrentlyFavorite);
     setFavoriteIds(next);
+  };
+
+  const markOpportunityAsViewed = async (id: string) => {
+    const next = await markAsViewed(id);
+    setViewedIds(next);
+  };
+
+  const deleteOpportunity = (id: string) => {
+    Alert.alert(
+      "Excluir oportunidade?",
+      "Ela será removida somente deste aparelho.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: () => {
+            void markAsDeleted(id).then((next) => setDeletedIds(next));
+          },
+        },
+      ],
+    );
   };
 
   const refresh = async () => {
@@ -85,9 +136,7 @@ export default function HomeScreen() {
                 <Text style={[styles.eyebrow, { color: colors.primary }]}>RADAR RADIOLOGIA RJ</Text>
                 <Text style={[styles.greeting, { color: colors.foreground }]}>Oportunidades para ela</Text>
                 <View style={styles.authorBlock}>
-                  {/* Substituível futuramente por assets/images/author-photo.png */}
-                  <View style={[styles.authorPhotoSpace, { borderColor: colors.border, backgroundColor: colors.surface }]} />
-                  <Text style={[styles.dedication, { color: colors.primary }]}>Por Márcio</Text>
+                  <Text style={[styles.dedication, { color: colors.primary }]}>Criado por Márcio Negão</Text>
                 </View>
               </View>
               <View style={[styles.liveDot, { backgroundColor: colors.success }]}>
@@ -149,6 +198,25 @@ export default function HomeScreen() {
               })}
             </View>
 
+            <View style={styles.filterRow}>
+              {["Todas", "Não vistas", "Vistas", "Favoritos"].map((filter) => {
+                const active = viewFilter === filter;
+                return (
+                  <Pressable
+                    key={filter}
+                    onPress={() => setViewFilter(filter as typeof viewFilter)}
+                    style={({ pressed }) => [
+                      styles.filterChip,
+                      { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primary : colors.surface },
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={[styles.filterText, { color: active ? "#FFFFFF" : colors.muted }]}>{filter}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
             <View style={styles.summaryRow}>
               <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <Text style={[styles.summaryNumber, { color: colors.primary }]}>RJ</Text>
@@ -170,6 +238,7 @@ export default function HomeScreen() {
         renderItem={({ item }) => (
           <Pressable
             onPress={async () => {
+              await markOpportunityAsViewed(item.id);
               if (item.sourceUrl) {
                 try {
                   await Linking.openURL(item.sourceUrl);
@@ -199,6 +268,9 @@ O link oficial ainda não está disponível para esta oportunidade.`
               <View style={styles.cardActions}>
                 <Pressable onPress={(event) => { event.stopPropagation(); void toggleFavorite(item.id); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={favoriteIds.includes(item.id) ? "Remover dos favoritos" : "Adicionar aos favoritos"}>
                   <IconSymbol name="star.fill" size={20} color={favoriteIds.includes(item.id) ? colors.warning : colors.muted} />
+                </Pressable>
+                <Pressable onPress={(event) => { event.stopPropagation(); deleteOpportunity(item.id); }} hitSlop={8} accessibilityRole="button" accessibilityLabel="Excluir oportunidade">
+                  <IconSymbol name="trash" size={20} color={colors.muted} />
                 </Pressable>
                 <IconSymbol name="chevron.right" size={18} color={colors.muted} />
               </View>

@@ -89,8 +89,15 @@ export function inferKind(text: string): MonitorCandidate["kind"] {
 function findDate(text: string): Date | null {
   const match = text.match(/\b(\d{1,2})[\/.](\d{1,2})[\/.](20\d{2})\b/);
   if (!match) return null;
+
   const value = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
-  return Number.isNaN(value.getTime()) ? null : value;
+  if (Number.isNaN(value.getTime())) return null;
+
+  // Datas futuras no texto geralmente representam prazo, prova ou outro evento,
+  // e não a data de publicação da oportunidade.
+  if (value.getTime() > Date.now()) return null;
+
+  return value;
 }
 
 export function looksLikeOpportunity(text: string): boolean {

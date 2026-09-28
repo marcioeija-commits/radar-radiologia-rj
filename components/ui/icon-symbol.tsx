@@ -18,6 +18,8 @@ const MAPPING = {
   "checkmark.circle.fill": "check-circle",
   "circle": "radio-button-unchecked",
   "chevron.right": "chevron-right",
+  "star.fill": "star",
+  "trash": "delete",
   "mappin.and.ellipse": "location-on",
   "calendar": "event",
   "shield.checkered": "verified-user",

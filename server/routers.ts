@@ -22,7 +22,7 @@ export const appRouter = router({
       return db.listMonitorSources();
     }),
     appVersion: publicProcedure.query(() => ({
-      version: "1.0.3",
+      version: "1.0.4",
       androidApkUrl: "https://github.com/marcioeija-commits/radar-radiologia-rj/releases/latest",
     })),
   }),

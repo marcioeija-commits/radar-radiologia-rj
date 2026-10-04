@@ -10,6 +10,7 @@ export type Opportunity = {
   role: Role;
   kind: OpportunityKind;
   published: string;
+  publishedAt?: string | Date | null;
   deadline: string;
   source: string;
   sourceUrl?: string;

@@ -67,6 +67,7 @@ export default function HomeScreen() {
       role: item.role === "Tecnólogo" ? "Tecnólogo" : "Técnico",
       kind: item.kind === "Processo seletivo" ? "Processo seletivo" : item.kind === "Concurso" ? "Concurso" : "Vaga",
       published: item.publishedAt ? new Date(item.publishedAt).toLocaleDateString("pt-BR") : "Novo alerta",
+      publishedAt: item.publishedAt ?? null,
       deadline: item.deadlineAt ? new Date(item.deadlineAt).toLocaleDateString("pt-BR") : "Confira a publicação",
       source: item.organization,
       sourceUrl: item.sourceUrl,
@@ -74,15 +75,22 @@ export default function HomeScreen() {
   }, [liveQuery.data]);
   const filteredOpportunities = useMemo(() => {
     const roleFiltered = filterOpportunities(opportunities, roleFilter);
-    return roleFiltered.filter((item) => {
-      if (deletedIds.includes(item.id)) return false;
-      const viewed = viewedIds.includes(item.id);
-      const favorite = favoriteIds.includes(item.id);
-      if (viewFilter === "Não vistas") return !viewed;
-      if (viewFilter === "Vistas") return viewed;
-      if (viewFilter === "Favoritos") return favorite;
-      return true;
-    });
+
+    return roleFiltered
+      .filter((item) => {
+        if (deletedIds.includes(item.id)) return false;
+        const viewed = viewedIds.includes(item.id);
+        const favorite = favoriteIds.includes(item.id);
+        if (viewFilter === "Não vistas") return !viewed;
+        if (viewFilter === "Vistas") return viewed;
+        if (viewFilter === "Favoritos") return favorite;
+        return true;
+      })
+      .sort((a, b) => {
+        const dateA = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+        const dateB = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+        return dateB - dateA;
+      });
   }, [opportunities, roleFilter, viewFilter, viewedIds, favoriteIds, deletedIds]);
 
   const hasUnreadOpportunities = opportunities.some(
@@ -242,7 +250,7 @@ export default function HomeScreen() {
               </View>
               <View style={[styles.liveDot, { backgroundColor: colors.success }]}>
                 <Animated.View style={{ transform: [{ rotate: bellRotation }] }}>
-                  <IconSymbol name="bell.fill" size={19} color="#FFFFFF" />
+                  <IconSymbol name="bell.fill" size={25} color="#FFFFFF" />
                 </Animated.View>
               </View>
             </View>
@@ -421,7 +429,7 @@ const styles = StyleSheet.create({
   authorBlock: { alignItems: "flex-start", marginTop: 10 },
   authorPhotoSpace: { width: 62, height: 48, borderRadius: 13, borderWidth: 1, marginBottom: 5 },
   dedication: { fontSize: 13, fontWeight: "800", letterSpacing: 0.1 },
-  liveDot: { width: 42, height: 42, borderRadius: 15, alignItems: "center", justifyContent: "center", shadowColor: "#123", shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 3 },
+  liveDot: { width: 50, height: 50, borderRadius: 17, alignItems: "center", justifyContent: "center", shadowColor: "#123", shadowOpacity: 0.18, shadowRadius: 9, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
   heroCard: { borderRadius: 26, padding: 21, minHeight: 166, flexDirection: "row", overflow: "hidden", shadowColor: "#1D4ED8", shadowOpacity: 0.2, shadowRadius: 15, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
   heroCopy: { flex: 1, paddingRight: 10 },
   heroKicker: { color: "#DBEAFE", fontSize: 10, fontWeight: "800", letterSpacing: 1.4, marginBottom: 10 },

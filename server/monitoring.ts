@@ -312,11 +312,32 @@ export async function runMonitoringCycle() {
 }
 export async function handleMonitorCron(req: Request, res: Response) {
   try {
-    const user = await sdk.authenticateRequest(req);
-    if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
+    const cronSecret = process.env.CRON_SECRET;
+
+    if (!cronSecret) {
+      return res.status(500).json({ error: "CRON_SECRET não configurado" });
+    }
+
+    const authorization = req.headers.authorization;
+    const providedSecret = authorization?.startsWith("Bearer ")
+      ? authorization.slice(7)
+      : "";
+
+    if (providedSecret !== cronSecret) {
+      return res.status(401).json({ error: "Não autorizado" });
+    }
+
     const result = await runMonitoringCycle();
-    return res.json({ ok: true, taskUid: user.taskUid, ...result });
+
+    return res.json({
+      ok: true,
+      ...result,
+    });
   } catch (error) {
-    return res.status(500).json({ error: String(error), context: { url: req.originalUrl }, timestamp: new Date().toISOString() });
+    return res.status(500).json({
+      error: String(error),
+      context: { url: req.originalUrl },
+      timestamp: new Date().toISOString(),
+    });
   }
 }

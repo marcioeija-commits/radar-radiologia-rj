@@ -12,6 +12,10 @@ jobs:
     steps:
       - name: Executar monitoramento
         run: |
-          curl --fail-with-body -X POST \
+          response=$(curl --fail-with-body -sS -X POST \
             "https://radar-radiologia-rj.onrender.com/api/scheduled/monitor-radiologia" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+
+          echo "===== RESULTADO DO MONITORAMENTO ====="
+          echo "$response"
+          echo "===== FIM DO MONITORAMENTO ====="

@@ -67,18 +67,38 @@ export const appRouter = router({
         .input(z.object({ installationId: z.string().uuid(), secret: z.string().regex(/^[a-f0-9]{64}$/i), enabled: z.boolean() }))
         .mutation(({ input }) => db.setInstallationPushEnabled(input.installationId, input.secret, input.enabled)),
       testNotification: publicProcedure
-        .input(z.object({ installationId: z.string().uuid(), secret: z.string().regex(/^[a-f0-9]{64}$/i) }))
+        .input(z.object({
+          installationId: z.string().uuid(),
+          secret: z.string().regex(/^[a-f0-9]{64}$/i),
+          opportunityId: z.string().optional(),
+        }))
         .mutation(async ({ input }) => {
           const device = await db.getInstallationPushToken(input.installationId, input.secret);
+          const opportunity = input.opportunityId
+            ? await db.getOpportunityById(input.opportunityId)
+            : null;
+
+          if (input.opportunityId && !opportunity) {
+            throw new Error("Oportunidade não encontrada");
+          }
+
           const response = await fetch("https://exp.host/--/api/v2/push/send", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               to: device.token,
               sound: "default",
-              title: "Radar Radiologia RJ",
-              body: "Teste de notificação recebido com sucesso neste aparelho.",
-              data: { type: "test-notification" },
+              title: opportunity?.title || "Radar Radiologia RJ",
+              body: opportunity
+                ? "Toque para abrir esta oportunidade."
+                : "Teste de notificação recebido com sucesso neste aparelho.",
+              data: opportunity
+                ? {
+                    type: "opportunity",
+                    opportunityId: opportunity.id,
+                    url: opportunity.sourceUrl,
+                  }
+                : { type: "test-notification" },
             }),
             signal: AbortSignal.timeout(10_000),
           });

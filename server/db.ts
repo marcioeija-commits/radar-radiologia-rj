@@ -174,6 +174,23 @@ export async function recordMonitorRun(result: {
   await db.update(monitorSources).set({ lastCheckedAt: result.finishedAt }).where(eq(monitorSources.id, result.sourceId));
 }
 
+export async function getOpportunityById(id: string) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db
+    .select({
+      id: opportunities.id,
+      title: opportunities.title,
+      sourceUrl: opportunities.sourceUrl,
+    })
+    .from(opportunities)
+    .where(eq(opportunities.id, id))
+    .limit(1);
+
+  return result[0] ?? null;
+}
+
 export async function listRecentOpportunities(limit = 50) {
   const db = await getDb();
   if (!db) return [];

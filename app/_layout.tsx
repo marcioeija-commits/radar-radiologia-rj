@@ -5,7 +5,8 @@ import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
-import { Platform } from "react-native";
+import { Linking, Platform } from "react-native";
+import * as Notifications from "expo-notifications";
 import "@/lib/_core/nativewind-pressable";
 import { ThemeProvider } from "@/lib/theme-provider";
 import {
@@ -49,6 +50,37 @@ export default function RootLayout() {
     const unsubscribe = subscribeSafeAreaInsets(handleSafeAreaUpdate);
     return () => unsubscribe();
   }, [handleSafeAreaUpdate]);
+
+  // Open the specific opportunity when the user taps its push notification.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+
+    const handleNotificationResponse = async (
+      response: Notifications.NotificationResponse,
+    ) => {
+      const data = response.notification.request.content.data as {
+        opportunityId?: unknown;
+        url?: unknown;
+      };
+
+      const url = typeof data?.url === "string" ? data.url.trim() : "";
+
+      if (!url) return;
+
+      try {
+        await Linking.openURL(url);
+      } catch (error) {
+        console.warn("Não foi possível abrir a oportunidade da notificação:", error);
+      }
+    };
+
+    const subscription =
+      Notifications.addNotificationResponseReceivedListener(
+        handleNotificationResponse,
+      );
+
+    return () => subscription.remove();
+  }, []);
 
   // Create clients once and reuse them
   const [queryClient] = useState(

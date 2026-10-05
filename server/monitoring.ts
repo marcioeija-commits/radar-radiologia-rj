@@ -205,7 +205,7 @@ async function sendExpoPushNotifications(items: MonitorCandidate[]) {
           return kindEnabled && roleEnabled && preference.todoEstado;
         })
         .slice(0, 3)
-        .map((item) => ({ to: device.token, sound: "default", title: `Nova oportunidade: ${item.role}`, body: item.title, data: { opportunityId: item.externalId, url: item.sourceUrl } }));
+        .map((item) => ({ to: device.token, sound: "default", channelId: "radar-oportunidades", title: `Nova oportunidade: ${item.role}`, body: item.title, data: { opportunityId: item.externalId, url: item.sourceUrl } }));
     });
   let sent = 0;
   for (let index = 0; index < messages.length; index += 100) {

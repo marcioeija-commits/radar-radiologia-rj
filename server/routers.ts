@@ -87,7 +87,7 @@ export const appRouter = router({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               to: device.token,
-              sound: "default",
+              sound: "default", channelId: "radar-oportunidades",
               title: opportunity?.title || "Radar Radiologia RJ",
               body: opportunity
                 ? "Toque para abrir esta oportunidade."

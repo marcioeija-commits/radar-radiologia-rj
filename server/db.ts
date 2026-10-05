@@ -178,6 +178,9 @@ export async function getOpportunityById(id: string) {
   const db = await getDb();
   if (!db) return null;
 
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId)) return null;
+
   const result = await db
     .select({
       id: opportunities.id,
@@ -185,7 +188,7 @@ export async function getOpportunityById(id: string) {
       sourceUrl: opportunities.sourceUrl,
     })
     .from(opportunities)
-    .where(eq(opportunities.id, id))
+    .where(eq(opportunities.id, numericId))
     .limit(1);
 
   return result[0] ?? null;

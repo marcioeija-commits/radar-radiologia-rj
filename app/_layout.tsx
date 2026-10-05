@@ -7,6 +7,15 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { Linking, Platform } from "react-native";
 import * as Notifications from "expo-notifications";
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
 import "@/lib/_core/nativewind-pressable";
 import { ThemeProvider } from "@/lib/theme-provider";
 import {
@@ -50,6 +59,23 @@ export default function RootLayout() {
     const unsubscribe = subscribeSafeAreaInsets(handleSafeAreaUpdate);
     return () => unsubscribe();
   }, [handleSafeAreaUpdate]);
+
+  // Configure the Android notification channel for new opportunities.
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+
+    void Notifications.setNotificationChannelAsync("radar-oportunidades", {
+      name: "Oportunidades de Radiologia",
+      importance: Notifications.AndroidImportance.HIGH,
+      sound: "default",
+      vibrationPattern: [0, 250, 150, 250],
+      enableVibrate: true,
+      enableLights: true,
+      showBadge: true,
+    }).catch((error) => {
+      console.warn("[Notifications] Failed to configure Android channel", error);
+    });
+  }, []);
 
   // Open the specific opportunity when the user taps its push notification.
   useEffect(() => {
